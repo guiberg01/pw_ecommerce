@@ -43,23 +43,19 @@ const userSchema = new mongoose.Schema(
   },
 );
 
-// criando o modelo do usuário a partir do schema
-const User = mongoose.model("User", userSchema);
-
 // Antes de salvar o usuário no banco, ele roda o código de baixo e faz o hash na senha se ela tiver sido modificada
-userSchema.pre("save", async function (next) {
-  if (!this.isModified("password")) return next();
-  try {
-    this.password = await bcrypt.hash(this.password, 10);
-    next();
-  } catch (error) {
-    next(error);
-  }
+userSchema.pre("save", async function () {
+  if (!this.isModified("password")) return;
+
+  this.password = await bcrypt.hash(this.password, 10);
 });
 
 // Compara a senha fornecida com a do banco
 userSchema.methods.comparePassword = async function (password) {
   return await bcrypt.compare(password, this.password);
 };
+
+// criando o modelo do usuário a partir do schema
+const User = mongoose.model("User", userSchema);
 
 export default User;

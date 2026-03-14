@@ -3,3 +3,6 @@ node_modules/
 
 #Variables de ambiente
 .env
+
+#test de requisição
+test.http
