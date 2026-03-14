@@ -1,5 +1,6 @@
 import mongoose from "mongoose";
 
+//conexão com o banco de dados, usando a string de conexão do .env
 export const connectDB = async () => {
   try {
     const db = await mongoose.connect(process.env.DB_URI);

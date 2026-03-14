@@ -1,10 +1,12 @@
-import express from "express";
+import { Router } from "express";
 import { logout, signup, login } from "../controllers/auth.controller.js";
 
-const router = express.Router();
+// Criando o "roteador" para as rotas de autenticação
+const router = Router();
 
-router.get("/signup", signup);
-router.get("/login", login);
-router.get("/logout", logout);
+// rotas (esse signup, login, logout ele ja ta puxando do controller)
+router.post("/signup", signup);
+router.post("/login", login);
+router.post("/logout", logout);
 
 export default router;

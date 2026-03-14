@@ -1,6 +1,7 @@
 import mongoose from "mongoose";
 import bcrypt from "bcryptjs";
 
+// definindo o schema do usuário, com os campos necessários e suas validações bem completinho
 const userSchema = new mongoose.Schema(
   {
     name: {
@@ -42,6 +43,7 @@ const userSchema = new mongoose.Schema(
   },
 );
 
+// criando o modelo do usuário a partir do schema
 const User = mongoose.model("User", userSchema);
 
 // Antes de salvar o usuário no banco, ele roda o código de baixo e faz o hash na senha se ela tiver sido modificada

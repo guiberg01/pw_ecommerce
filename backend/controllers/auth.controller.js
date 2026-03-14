@@ -1,3 +1,5 @@
+// definindo as funções de controle para as rotas de autenticação
+
 export const signup = async (req, res) => {
   res.send("Rota de cadastro chamada!");
 };
