@@ -1,6 +1,7 @@
 // importando os módulos necessários
 import express from "express";
 import dotenv from "dotenv";
+import cookieParser from "cookie-parser";
 
 // Configuração de DNS para evitar problemas de conexão
 import dns from "dns";
@@ -21,6 +22,7 @@ const PORT = process.env.PORT || 3980;
 
 // Middleware pra funcionar req JSON
 app.use(express.json());
+app.use(cookieParser());
 
 // Definindo rota auth
 app.use("/api/auth", authRoutes);

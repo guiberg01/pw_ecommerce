@@ -61,13 +61,10 @@ export const signup = async (req, res) => {
     setCookies(res, accessToken, refreshToken);
 
     res.status(201).json({
-      user: {
-        id: user._id,
-        name: user.name,
-        email: user.email,
-        role: user.role,
-      },
-      message: "Usuário criado com sucesso",
+      id: user._id,
+      name: user.name,
+      email: user.email,
+      role: user.role,
     });
   } catch (error) {
     return res.status(500).json({ message: error.message });
@@ -75,9 +72,44 @@ export const signup = async (req, res) => {
 };
 
 export const login = async (req, res) => {
-  res.send("Rota de login chamada!");
+  const { email, password } = req.body;
+
+  try {
+    const user = await User.findOne({ email });
+
+    if (user && (await user.comparePassword(password))) {
+      const { accessToken, refreshToken } = generateToken(user._id);
+      await restoreRefreshToken(user._id, refreshToken);
+
+      setCookies(res, accessToken, refreshToken);
+
+      return res.status(200).json({
+        id: user._id,
+        name: user.name,
+        email: user.email,
+        role: user.role,
+      });
+    } else {
+      return res.status(401).json({ message: "Credenciais inválidas" });
+    }
+  } catch (error) {
+    return res.status(500).json({ message: "erro ao logar: " + error.message });
+  }
 };
 
 export const logout = async (req, res) => {
-  res.send("Rota de logout chamada!");
+  try {
+    const refreshToken = req.cookies.refreshToken;
+
+    if (refreshToken) {
+      const decoded = jwt.verify(refreshToken, process.env.REFRESH_TOKEN);
+      await redis.del(`refreshToken:${decoded.userId}`);
+    }
+
+    res.clearCookie("accessToken");
+    res.clearCookie("refreshToken");
+    res.json({ message: "Logout realizado com sucesso" });
+  } catch (error) {
+    return res.status(500).json({ message: error.message });
+  }
 };
