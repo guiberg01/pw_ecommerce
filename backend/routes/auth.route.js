@@ -1,5 +1,10 @@
 import { Router } from "express";
-import { logout, signup, login } from "../controllers/auth.controller.js";
+import {
+  logout,
+  signup,
+  login,
+  refreshToken,
+} from "../controllers/auth.controller.js";
 
 // Criando o "roteador" para as rotas de autenticação
 const router = Router();
@@ -8,5 +13,6 @@ const router = Router();
 router.post("/signup", signup);
 router.post("/login", login);
 router.post("/logout", logout);
+router.post("/refresh", refreshToken);
 
 export default router;
