@@ -1,15 +1,15 @@
 import { Router } from "express";
-import { allProducts, createProduct } from "../controllers/product.controller.js";
-import { isLoggedIn, isAdmin, isSellerOrAdmin } from "../middleware/auth.middleware.js";
+import { allProducts, updateProduct, deleteProduct } from "../controllers/product.controller.js";
+import { isLoggedIn, isSellerOrAdmin } from "../middleware/auth.middleware.js";
+import { validateBody } from "../middleware/validation.middleware.js";
+import { updateProductSchema } from "../validators/product.validator.js";
 
 const router = Router();
 
-router.get("/all", isLoggedIn, isAdmin, allProducts);
+router.get("/", allProducts);
 
-router.post("/add", isLoggedIn, isSellerOrAdmin, createProduct);
+router.delete("/:id", isLoggedIn, isSellerOrAdmin, deleteProduct);
 
-router.delete("/delete/:id", isLoggedIn, isSellerOrAdmin);
-
-router.put("/update/:id", isLoggedIn, isSellerOrAdmin);
+router.put("/:id", isLoggedIn, isSellerOrAdmin, validateBody(updateProductSchema), updateProduct);
 
 export default router;

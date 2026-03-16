@@ -39,8 +39,12 @@ app.use("/api/stores", storeRoutes);
 // Middleware de tratamento de erros
 app.use(errorHandler);
 
-// Iniciando o servidor
-app.listen(PORT, () => {
-  console.log(`Server rodando em: http://localhost:${PORT}`);
-  connectDB();
-});
+const bootstrap = async () => {
+  await connectDB();
+
+  app.listen(PORT, () => {
+    console.log(`Server rodando em: http://localhost:${PORT}`);
+  });
+};
+
+bootstrap();

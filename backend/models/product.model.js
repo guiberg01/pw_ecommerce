@@ -23,6 +23,12 @@ const productSchema = new mongoose.Schema(
       type: String,
       required: [true, "A categoria do produto é obrigatória"],
     },
+    store: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Store",
+      required: [true, "A loja do produto é obrigatória"],
+      index: true,
+    },
     highlighted: {
       type: Boolean,
       default: false,

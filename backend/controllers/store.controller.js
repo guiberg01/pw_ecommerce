@@ -27,17 +27,21 @@ const buildUniqueSlug = async (name) => {
   return slug;
 };
 
-export const createStore = async (req, res) => {
+export const createStore = async (req, res, next) => {
   try {
     const { name, description, logoUrl } = req.body;
 
     if (!name) {
-      return res.status(400).json({ message: "Nome da loja é obrigatório" });
+      const error = new Error("Nome da loja é obrigatório");
+      error.statusCode = 400;
+      throw error;
     }
 
     const existingStore = await Store.findOne({ owner: req.user._id });
     if (existingStore) {
-      return res.status(409).json({ message: "Este seller já possui uma loja" });
+      const error = new Error("Este seller já possui uma loja");
+      error.statusCode = 409;
+      throw error;
     }
 
     const slug = await buildUniqueSlug(name);
@@ -52,46 +56,52 @@ export const createStore = async (req, res) => {
 
     return res.status(201).json(store);
   } catch (error) {
-    return res.status(500).json({ message: error.message });
+    return next(error);
   }
 };
 
-export const getMyStore = async (req, res) => {
+export const getMyStore = async (req, res, next) => {
   try {
     const store = await Store.findOne({ owner: req.user._id });
 
     if (!store) {
-      return res.status(404).json({ message: "Loja não encontrada" });
+      const error = new Error("Loja não encontrada");
+      error.statusCode = 404;
+      throw error;
     }
 
     return res.status(200).json(store);
   } catch (error) {
-    return res.status(500).json({ message: error.message });
+    return next(error);
   }
 };
 
-export const getStoreById = async (req, res) => {
+export const getStoreById = async (req, res, next) => {
   try {
     const { storeId } = req.params;
     const store = await Store.findById(storeId).populate("owner", "name email role");
 
     if (!store) {
-      return res.status(404).json({ message: "Loja não encontrada" });
+      const error = new Error("Loja não encontrada");
+      error.statusCode = 404;
+      throw error;
     }
 
     return res.status(200).json(store);
   } catch (error) {
-    return res.status(500).json({ message: error.message });
+    return next(error);
   }
 };
 
-export const updateMyStore = async (req, res) => {
+export const updateMyStore = async (req, res, next) => {
   try {
     const { name, description, logoUrl, status } = req.body;
 
     const store = await Store.findOne({ owner: req.user._id });
     if (!store) {
-      return res.status(404).json({ message: "Loja não encontrada" });
+      const error = new Error("Loja não encontrada");
+      error.statusCode = 404;
+      throw error;
     }
 
     if (name && name !== store.name) {
@@ -115,6 +125,6 @@ export const updateMyStore = async (req, res) => {
 
     return res.status(200).json(store);
   } catch (error) {
-    return res.status(500).json({ message: error.message });
+    return next(error);
   }
 };
