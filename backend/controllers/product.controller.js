@@ -116,7 +116,8 @@ export const deleteProduct = async (req, res, next) => {
       throw error;
     }
 
-    await product.deleteOne();
+    //await product.deleteOne();
+    await Product.findByIdAndUpdate(id, { status: "deleted" });
 
     return sendSuccess(res, 200, "Produto removido com sucesso");
   } catch (error) {

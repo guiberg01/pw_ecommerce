@@ -32,7 +32,7 @@ const storeSchema = new mongoose.Schema(
     },
     status: {
       type: String,
-      enum: ["active", "blocked"],
+      enum: ["active", "blocked", "deleted"],
       default: "active",
     },
   },

@@ -5,6 +5,7 @@ import {
   getMyStore,
   getStoreById,
   updateMyStore,
+  deleteStore,
 } from "../controllers/store.controller.js";
 import { createProductForMyStore } from "../controllers/product.controller.js";
 import { isAdmin, isLoggedIn, isSellerOrAdmin } from "../middleware/auth.middleware.js";
@@ -22,5 +23,7 @@ router.put("/me", isLoggedIn, isSellerOrAdmin, validateBody(updateStoreSchema), 
 router.post("/me/products", isLoggedIn, isSellerOrAdmin, validateBody(createProductSchema), createProductForMyStore);
 
 router.get("/:storeId", validateParams(storeIdParamSchema), getStoreById);
+
+router.delete("/:storeId", isLoggedIn, isSellerOrAdmin, validateParams(storeIdParamSchema), deleteStore);
 
 export default router;

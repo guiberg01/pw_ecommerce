@@ -128,3 +128,33 @@ export const updateMyStore = async (req, res, next) => {
     return next(error);
   }
 };
+
+export const deleteStore = async (req, res, next) => {
+  try {
+    const store = await Store.findOne({ owner: req.user._id });
+
+    if (!store) {
+      const error = new Error("Loja não encontrada");
+      error.statusCode = 404;
+      throw error;
+    }
+
+    if (store.products && store.products.length > 0) {
+      const error = new Error("Não é possível deletar uma loja que possui produtos");
+      error.statusCode = 400;
+      throw error;
+    }
+
+    if (req.user.role !== "admin" && !store.owner.equals(req.user._id)) {
+      const error = new Error("Apenas o dono da loja ou um admin podem deletar esta loja");
+      error.statusCode = 403;
+      throw error;
+    }
+
+    await Store.findByIdAndUpdate(store._id, { status: "deleted" });
+
+    return sendSuccess(res, 200, "Loja deletada com sucesso");
+  } catch (error) {
+    return next(error);
+  }
+};
