@@ -22,7 +22,7 @@ export const createStore = async (req, res, next) => {
   try {
     const { name, description, logoUrl } = req.body;
 
-    const existingStore = await Store.findOne({ owner: req.user._id });
+    const existingStore = await Store.findOne({ owner: req.user._id, status: { $ne: "deleted" } });
     if (existingStore) {
       const error = new Error("Este seller já possui uma loja");
       error.statusCode = 409;
@@ -47,7 +47,7 @@ export const createStore = async (req, res, next) => {
 
 export const getMyStore = async (req, res, next) => {
   try {
-    const store = await Store.findOne({ owner: req.user._id });
+    const store = await Store.findOne({ owner: req.user._id, status: { $ne: "deleted" } });
 
     if (!store) {
       const error = new Error("Loja não encontrada");
@@ -64,7 +64,10 @@ export const getMyStore = async (req, res, next) => {
 export const getStoreById = async (req, res, next) => {
   try {
     const { storeId } = req.params;
-    const store = await Store.findById(storeId).populate("owner", "name email role");
+    const store = await Store.findOne({ _id: storeId, status: { $ne: "deleted" } }).populate(
+      "owner",
+      "name email role",
+    );
 
     if (!store) {
       const error = new Error("Loja não encontrada");
@@ -82,7 +85,7 @@ export const updateMyStore = async (req, res, next) => {
   try {
     const { name, description, logoUrl } = req.body;
 
-    const store = await Store.findOne({ owner: req.user._id });
+    const store = await Store.findOne({ owner: req.user._id, status: { $ne: "deleted" } });
     if (!store) {
       const error = new Error("Loja não encontrada");
       error.statusCode = 404;
@@ -113,7 +116,7 @@ export const updateMyStore = async (req, res, next) => {
 export const deleteMyStore = async (req, res, next) => {
   try {
     const { storeId } = req.params;
-    const store = await Store.findOne({ _id: storeId });
+    const store = await Store.findOne({ _id: storeId, status: { $ne: "deleted" } });
 
     if (!store) {
       const error = new Error("Loja não encontrada");
@@ -127,7 +130,10 @@ export const deleteMyStore = async (req, res, next) => {
       throw error;
     }
 
-    const hasProduct = await Product.exists({ store: storeId });
+    const hasProduct = await Product.exists({
+      store: storeId,
+      status: { $ne: "deleted" },
+    });
 
     if (hasProduct) {
       const error = new Error("Não é possível deletar uma loja que possui produtos");

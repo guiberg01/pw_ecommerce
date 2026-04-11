@@ -1,9 +1,8 @@
 // definindo as funções de controle para as rotas de autenticação
 import User from "../models/user.model.js";
 import jwt from "jsonwebtoken";
-import { redis } from "../config/redis.js";
 import { sendSuccess } from "../helpers/successResponse.js";
-import { ca } from "zod/locales";
+import { deleteRefreshToken, getRefreshToken, setRefreshToken } from "../helpers/redisAuth.helper.js";
 
 //criando os tokens
 const generateToken = (userId) => {
@@ -16,11 +15,6 @@ const generateToken = (userId) => {
   });
 
   return { accessToken, refreshToken };
-};
-
-//guardando o refreshToken no redis
-const restoreRefreshToken = async (userId, refreshToken) => {
-  await redis.set(`refreshToken:${userId}`, refreshToken, "EX", 7 * 24 * 60 * 60);
 };
 
 //função para setar os cookies dinamicamente
@@ -53,7 +47,7 @@ export const signup = async (req, res, next) => {
     const user = await User.create({ name, email, password });
 
     const { accessToken, refreshToken } = generateToken(user._id);
-    await restoreRefreshToken(user._id, refreshToken);
+    await setRefreshToken(user._id, refreshToken);
 
     setCookies(res, accessToken, refreshToken);
 
@@ -80,7 +74,7 @@ export const login = async (req, res, next) => {
     }
 
     const { accessToken, refreshToken } = generateToken(user._id);
-    await restoreRefreshToken(user._id, refreshToken);
+    await setRefreshToken(user._id, refreshToken);
 
     setCookies(res, accessToken, refreshToken);
 
@@ -101,7 +95,7 @@ export const logout = async (req, res, next) => {
 
     if (refreshToken) {
       const decoded = jwt.verify(refreshToken, process.env.REFRESH_TOKEN);
-      await redis.del(`refreshToken:${decoded.userId}`);
+      await deleteRefreshToken(decoded.userId);
     }
 
     res.clearCookie("accessToken");
@@ -123,7 +117,7 @@ export const refreshToken = async (req, res, next) => {
     }
 
     const decoded = jwt.verify(refreshToken, process.env.REFRESH_TOKEN);
-    const storedToken = await redis.get(`refreshToken:${decoded.userId}`);
+    const storedToken = await getRefreshToken(decoded.userId);
 
     if (storedToken !== refreshToken) {
       const error = new Error("Refresh token inválido");

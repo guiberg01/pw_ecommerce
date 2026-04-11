@@ -28,7 +28,6 @@ const storeSchema = new mongoose.Schema(
       type: mongoose.Schema.Types.ObjectId,
       ref: "User",
       required: true,
-      unique: true,
     },
     status: {
       type: String,
@@ -37,6 +36,14 @@ const storeSchema = new mongoose.Schema(
     },
   },
   { timestamps: true },
+);
+
+storeSchema.index(
+  { owner: 1 },
+  {
+    unique: true,
+    partialFilterExpression: { status: { $ne: "deleted" } },
+  },
 );
 
 const Store = mongoose.model("Store", storeSchema);

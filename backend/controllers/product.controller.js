@@ -8,8 +8,15 @@ const canManageProduct = (product, user) => {
 
 export const allProducts = async (req, res, next) => {
   try {
-    const products = await Product.find().populate("store", "name slug owner status");
-    return sendSuccess(res, 200, "Produtos listados com sucesso", products);
+    const products = await Product.find({ status: { $ne: "deleted" } }).populate({
+      path: "store",
+      select: "name slug owner status",
+      match: { status: { $ne: "deleted" } },
+    });
+
+    const visibleProducts = products.filter((product) => product.store);
+
+    return sendSuccess(res, 200, "Produtos listados com sucesso", visibleProducts);
   } catch (error) {
     return next(error);
   }
@@ -19,7 +26,7 @@ export const createProductForMyStore = async (req, res, next) => {
   try {
     const { name, description, price, imageUrl, category, highlighted, stock } = req.body;
 
-    const store = await Store.findOne({ owner: req.user._id });
+    const store = await Store.findOne({ owner: req.user._id, status: { $ne: "deleted" } });
 
     if (!store) {
       const error = new Error("Loja não encontrada");
@@ -50,7 +57,7 @@ export const createProductForMyStore = async (req, res, next) => {
 export const updateProduct = async (req, res, next) => {
   try {
     const { id } = req.params;
-    const product = await Product.findById(id).populate("store", "owner");
+    const product = await Product.findOne({ _id: id, status: { $ne: "deleted" } }).populate("store", "owner");
 
     if (!product) {
       const error = new Error("Produto não encontrado");
@@ -78,7 +85,7 @@ export const updateProduct = async (req, res, next) => {
 export const deleteProduct = async (req, res, next) => {
   try {
     const { id } = req.params;
-    const product = await Product.findById(id).populate("store", "owner");
+    const product = await Product.findOne({ _id: id, status: { $ne: "deleted" } }).populate("store", "owner");
 
     if (!product) {
       const error = new Error("Produto não encontrado");

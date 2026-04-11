@@ -3,6 +3,16 @@ import { sendError } from "../helpers/errorResponse.js";
 export const errorHandler = (err, req, res, next) => {
   console.error(err);
 
+  if (err.code === "REDIS_UNAVAILABLE") {
+    return sendError(
+      res,
+      503,
+      "Serviço de autenticação temporariamente indisponível",
+      "REDIS_UNAVAILABLE",
+      err.details,
+    );
+  }
+
   if (err.name === "TokenExpiredError") {
     return sendError(res, 401, "Não autorizado - Token expirado", "TOKEN_EXPIRED");
   }

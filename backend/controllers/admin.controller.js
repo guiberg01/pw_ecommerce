@@ -5,8 +5,8 @@ import { sendSuccess } from "../helpers/successResponse.js";
 export const allStoresForAdmin = async (req, res, next) => {
   try {
     const [stores, myStore] = await Promise.all([
-      Store.find().populate("owner", "name email role"),
-      Store.findOne({ owner: req.user._id }).select("_id"),
+      Store.find({ status: { $ne: "deleted" } }).populate("owner", "name email role"),
+      Store.findOne({ owner: req.user._id, status: { $ne: "deleted" } }).select("_id"),
     ]);
 
     return sendSuccess(res, 200, "Lojas listadas com sucesso", {
@@ -23,7 +23,7 @@ export const createProductForStoreByAdmin = async (req, res, next) => {
     const { storeId } = req.params;
     const { name, description, price, imageUrl, category, highlighted, stock } = req.body;
 
-    const store = await Store.findById(storeId);
+    const store = await Store.findOne({ _id: storeId, status: { $ne: "deleted" } });
 
     if (!store) {
       const error = new Error("Loja não encontrada");
@@ -55,7 +55,7 @@ export const createProductForStoreByAdmin = async (req, res, next) => {
 export const deleteStoreByAdmin = async (req, res, next) => {
   try {
     const { storeId } = req.params;
-    const store = await Store.findById(storeId);
+    const store = await Store.findOne({ _id: storeId, status: { $ne: "deleted" } });
 
     if (!store) {
       const error = new Error("Loja não encontrada");
@@ -63,7 +63,7 @@ export const deleteStoreByAdmin = async (req, res, next) => {
       throw error;
     }
 
-    const hasProduct = await Product.exists({ store: storeId });
+    const hasProduct = await Product.exists({ store: storeId, status: { $ne: "deleted" } });
 
     if (hasProduct) {
       const error = new Error("Não é possível deletar uma loja que possui produtos");
@@ -82,7 +82,7 @@ export const deleteStoreByAdmin = async (req, res, next) => {
 export const updateProductByAdmin = async (req, res, next) => {
   try {
     const { id } = req.params;
-    const product = await Product.findById(id);
+    const product = await Product.findOne({ _id: id, status: { $ne: "deleted" } });
 
     if (!product) {
       const error = new Error("Produto não encontrado");
@@ -104,7 +104,7 @@ export const updateProductByAdmin = async (req, res, next) => {
 export const deleteProductByAdmin = async (req, res, next) => {
   try {
     const { id } = req.params;
-    const product = await Product.findById(id);
+    const product = await Product.findOne({ _id: id, status: { $ne: "deleted" } });
 
     if (!product) {
       const error = new Error("Produto não encontrado");
@@ -125,7 +125,7 @@ export const updateStoreStatusByAdmin = async (req, res, next) => {
     const { storeId } = req.params;
     const { status } = req.body;
 
-    const store = await Store.findById(storeId);
+    const store = await Store.findOne({ _id: storeId, status: { $ne: "deleted" } });
 
     if (!store) {
       const error = new Error("Loja não encontrada");

@@ -25,7 +25,7 @@ export const updateProductSchema = z
     category: z.string().trim().min(1, "Categoria é obrigatória").optional(),
     highlighted: z.boolean().optional(),
     stock: z.number().int().min(0, "Estoque deve ser maior ou igual a zero").optional(),
-    status: z.enum(["available", "blocked", "removed"]).optional(),
+    status: z.enum(["available", "blocked", "unavailable", "cancelled"]).optional(),
   })
   .refine((data) => Object.keys(data).length > 0, {
     message: "Envie ao menos um campo para atualização",
