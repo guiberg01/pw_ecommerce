@@ -3,8 +3,6 @@ import Store from "../models/store.model.js";
 import { sendSuccess } from "../helpers/successResponse.js";
 
 const canManageProduct = (product, user) => {
-  if (user.role === "admin") return true;
-
   return product.store?.owner?.toString() === user._id.toString();
 };
 
@@ -19,31 +17,9 @@ export const allProducts = async (req, res, next) => {
 
 export const createProductForMyStore = async (req, res, next) => {
   try {
-    const { name, description, price, imageUrl, category, highlighted, stock, storeId } = req.body;
+    const { name, description, price, imageUrl, category, highlighted, stock } = req.body;
 
-    let store = null;
-
-    if (req.user.role === "admin") {
-      if (storeId) {
-        store = await Store.findById(storeId);
-      } else {
-        store = await Store.findOne({ owner: req.user._id });
-
-        if (!store) {
-          const error = new Error("Admin sem loja vinculada precisa informar o storeId");
-          error.statusCode = 400;
-          throw error;
-        }
-      }
-    } else {
-      if (storeId) {
-        const error = new Error("Seller só pode criar produto na própria loja");
-        error.statusCode = 403;
-        throw error;
-      }
-
-      store = await Store.findOne({ owner: req.user._id });
-    }
+    const store = await Store.findOne({ owner: req.user._id });
 
     if (!store) {
       const error = new Error("Loja não encontrada");

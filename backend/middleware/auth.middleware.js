@@ -51,4 +51,4 @@ export const authorizeRoles = (...allowedRoles) => {
 };
 
 export const isAdmin = authorizeRoles("admin");
-export const isSellerOrAdmin = authorizeRoles("seller", "admin");
+export const isSeller = authorizeRoles("seller");

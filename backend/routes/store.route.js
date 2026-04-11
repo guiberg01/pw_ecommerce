@@ -1,29 +1,27 @@
 import { Router } from "express";
 import {
-  allStoresForAdmin,
   createStore,
   getMyStore,
   getStoreById,
   updateMyStore,
-  deleteStore,
+  deleteMyStore,
 } from "../controllers/store.controller.js";
 import { createProductForMyStore } from "../controllers/product.controller.js";
-import { isAdmin, isLoggedIn, isSellerOrAdmin } from "../middleware/auth.middleware.js";
+import { isLoggedIn, isSeller } from "../middleware/auth.middleware.js";
 import { validateBody, validateParams } from "../middleware/validation.middleware.js";
 import { createProductSchema } from "../validators/product.validator.js";
-import { createStoreSchema, storeIdParamSchema, updateStoreSchema } from "../validators/store.validator.js";
+import { createStoreSchema, storeIdParamSchema, updateMyStoreSchema } from "../validators/store.validator.js";
 
 const router = Router();
 
-router.get("/", isLoggedIn, isAdmin, allStoresForAdmin);
-router.post("/", isLoggedIn, isSellerOrAdmin, validateBody(createStoreSchema), createStore);
+router.post("/", isLoggedIn, isSeller, validateBody(createStoreSchema), createStore);
 
-router.get("/me", isLoggedIn, isSellerOrAdmin, getMyStore);
-router.put("/me", isLoggedIn, isSellerOrAdmin, validateBody(updateStoreSchema), updateMyStore);
-router.post("/me/products", isLoggedIn, isSellerOrAdmin, validateBody(createProductSchema), createProductForMyStore);
+router.get("/me", isLoggedIn, isSeller, getMyStore);
+router.put("/me", isLoggedIn, isSeller, validateBody(updateMyStoreSchema), updateMyStore);
+router.post("/me/products", isLoggedIn, isSeller, validateBody(createProductSchema), createProductForMyStore);
 
 router.get("/:storeId", validateParams(storeIdParamSchema), getStoreById);
 
-router.delete("/:storeId", isLoggedIn, isSellerOrAdmin, validateParams(storeIdParamSchema), deleteStore);
+router.delete("/:storeId", isLoggedIn, isSeller, validateParams(storeIdParamSchema), deleteMyStore);
 
 export default router;

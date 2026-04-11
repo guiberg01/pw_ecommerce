@@ -17,22 +17,6 @@ const buildUniqueSlug = async (name) => {
   return slug;
 };
 
-export const allStoresForAdmin = async (req, res, next) => {
-  try {
-    const [stores, myStore] = await Promise.all([
-      Store.find().populate("owner", "name email role"),
-      Store.findOne({ owner: req.user._id }).select("_id"),
-    ]);
-
-    return sendSuccess(res, 200, "Lojas listadas com sucesso", {
-      stores,
-      myStoreId: myStore?._id ?? null,
-    });
-  } catch (error) {
-    return next(error);
-  }
-};
-
 //cria loja
 export const createStore = async (req, res, next) => {
   try {
@@ -96,7 +80,7 @@ export const getStoreById = async (req, res, next) => {
 
 export const updateMyStore = async (req, res, next) => {
   try {
-    const { name, description, logoUrl, status } = req.body;
+    const { name, description, logoUrl } = req.body;
 
     const store = await Store.findOne({ owner: req.user._id });
     if (!store) {
@@ -118,10 +102,6 @@ export const updateMyStore = async (req, res, next) => {
       store.logoUrl = logoUrl;
     }
 
-    if (req.user.role === "admin" && status) {
-      store.status = status;
-    }
-
     await store.save();
 
     return sendSuccess(res, 200, "Loja atualizada com sucesso", store);
@@ -130,7 +110,7 @@ export const updateMyStore = async (req, res, next) => {
   }
 };
 
-export const deleteStore = async (req, res, next) => {
+export const deleteMyStore = async (req, res, next) => {
   try {
     const { storeId } = req.params;
     const store = await Store.findOne({ _id: storeId });
@@ -141,8 +121,8 @@ export const deleteStore = async (req, res, next) => {
       throw error;
     }
 
-    if (req.user.role !== "admin" && !store.owner.equals(req.user._id)) {
-      const error = new Error("Apenas o dono da loja ou um admin podem deletar esta loja");
+    if (!store.owner.equals(req.user._id)) {
+      const error = new Error("Apenas o dono da loja pode deletar esta loja");
       error.statusCode = 403;
       throw error;
     }

@@ -3,6 +3,7 @@ import User from "../models/user.model.js";
 import jwt from "jsonwebtoken";
 import { redis } from "../config/redis.js";
 import { sendSuccess } from "../helpers/successResponse.js";
+import { ca } from "zod/locales";
 
 //criando os tokens
 const generateToken = (userId) => {

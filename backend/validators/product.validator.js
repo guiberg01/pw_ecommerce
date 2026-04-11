@@ -13,7 +13,6 @@ export const createProductSchema = z.object({
   category: z.string().trim().min(1, "Categoria é obrigatória"),
   highlighted: z.boolean().optional().default(false),
   stock: z.number().int().min(0, "Estoque deve ser maior ou igual a zero"),
-  storeId: z.string().trim().min(1).optional(),
 });
 
 //update

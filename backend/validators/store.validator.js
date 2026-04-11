@@ -8,16 +8,19 @@ export const createStoreSchema = z.object({
   logoUrl: z.string().trim().url("A logo deve ser uma URL válida").optional().default(""),
 });
 
-export const updateStoreSchema = z
+export const updateMyStoreSchema = z
   .object({
     name: z.string().trim().min(1, "Nome da loja é obrigatório").optional(),
     description: z.string().trim().optional(),
     logoUrl: z.string().trim().url("A logo deve ser uma URL válida").optional(),
-    status: z.enum(["active", "blocked"]).optional(),
   })
   .refine((data) => Object.keys(data).length > 0, {
     message: "Envie ao menos um campo para atualização",
   });
+
+export const updateStoreStatusByAdminSchema = z.object({
+  status: z.enum(["active", "blocked"]),
+});
 
 export const storeIdParamSchema = z.object({
   storeId: mongoId,
