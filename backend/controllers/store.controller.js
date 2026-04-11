@@ -1,4 +1,5 @@
 import Store from "../models/store.model.js";
+import Product from "../models/product.model.js";
 import { slugify } from "../helpers/slug.js";
 import { sendSuccess } from "../helpers/successResponse.js";
 
@@ -131,7 +132,8 @@ export const updateMyStore = async (req, res, next) => {
 
 export const deleteStore = async (req, res, next) => {
   try {
-    const store = await Store.findOne({ owner: req.user._id });
+    const { storeId } = req.params;
+    const store = await Store.findOne({ _id: storeId });
 
     if (!store) {
       const error = new Error("Loja não encontrada");
@@ -139,15 +141,17 @@ export const deleteStore = async (req, res, next) => {
       throw error;
     }
 
-    if (store.products && store.products.length > 0) {
-      const error = new Error("Não é possível deletar uma loja que possui produtos");
-      error.statusCode = 400;
-      throw error;
-    }
-
     if (req.user.role !== "admin" && !store.owner.equals(req.user._id)) {
       const error = new Error("Apenas o dono da loja ou um admin podem deletar esta loja");
       error.statusCode = 403;
+      throw error;
+    }
+
+    const hasProduct = await Product.exists({ store: storeId });
+
+    if (hasProduct) {
+      const error = new Error("Não é possível deletar uma loja que possui produtos");
+      error.statusCode = 400;
       throw error;
     }
 
