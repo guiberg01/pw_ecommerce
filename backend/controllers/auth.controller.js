@@ -1,7 +1,8 @@
 // definindo as funções de controle para as rotas de autenticação
 import User from "../models/user.model.js";
 import jwt from "jsonwebtoken";
-import { redis } from "../config/redis.js";
+import { sendSuccess } from "../helpers/successResponse.js";
+import { deleteRefreshToken, getRefreshToken, setRefreshToken } from "../helpers/redisAuth.helper.js";
 
 //criando os tokens
 const generateToken = (userId) => {
@@ -14,11 +15,6 @@ const generateToken = (userId) => {
   });
 
   return { accessToken, refreshToken };
-};
-
-//guardando o refreshToken no redis
-const restoreRefreshToken = async (userId, refreshToken) => {
-  await redis.set(`refreshToken:${userId}`, refreshToken, "EX", 7 * 24 * 60 * 60);
 };
 
 //função para setar os cookies dinamicamente
@@ -37,99 +33,106 @@ const setCookies = (res, accessToken, refreshToken) => {
   setAuthCookie(res, "refreshToken", refreshToken, 7 * 24 * 60 * 60 * 1000); // 7 dias
 };
 
-export const signup = async (req, res) => {
-  const { name, email, password } = req.body;
-
+export const signup = async (req, res, next) => {
   try {
+    const { name, email, password } = req.body;
     const userExists = await User.findOne({ email });
 
     if (userExists) {
-      return res.status(400).json({ message: "Usuário já existe" });
+      const error = new Error("Usuário já existe");
+      error.statusCode = 400;
+      throw error;
     }
 
     const user = await User.create({ name, email, password });
 
-    //autenticacao
     const { accessToken, refreshToken } = generateToken(user._id);
-    await restoreRefreshToken(user._id, refreshToken);
+    await setRefreshToken(user._id, refreshToken);
 
     setCookies(res, accessToken, refreshToken);
 
-    res.status(201).json({
+    return sendSuccess(res, 201, "Cadastro realizado com sucesso", {
       id: user._id,
       name: user.name,
       email: user.email,
       role: user.role,
     });
   } catch (error) {
-    return res.status(500).json({ message: error.message });
+    return next(error);
   }
 };
 
-export const login = async (req, res) => {
-  const { email, password } = req.body;
-
+export const login = async (req, res, next) => {
   try {
+    const { email, password } = req.body;
     const user = await User.findOne({ email });
 
-    if (user && (await user.comparePassword(password))) {
-      const { accessToken, refreshToken } = generateToken(user._id);
-      await restoreRefreshToken(user._id, refreshToken);
-
-      setCookies(res, accessToken, refreshToken);
-
-      return res.status(200).json({
-        id: user._id,
-        name: user.name,
-        email: user.email,
-        role: user.role,
-      });
-    } else {
-      return res.status(401).json({ message: "Credenciais inválidas" });
+    if (!user || !(await user.comparePassword(password))) {
+      const error = new Error("Credenciais inválidas");
+      error.statusCode = 401;
+      throw error;
     }
+
+    const { accessToken, refreshToken } = generateToken(user._id);
+    await setRefreshToken(user._id, refreshToken);
+
+    setCookies(res, accessToken, refreshToken);
+
+    return sendSuccess(res, 200, "Login realizado com sucesso", {
+      id: user._id,
+      name: user.name,
+      email: user.email,
+      role: user.role,
+    });
   } catch (error) {
-    return res.status(500).json({ message: "erro ao logar: " + error.message });
+    return next(error);
   }
 };
 
-export const logout = async (req, res) => {
+export const logout = async (req, res, next) => {
   try {
     const refreshToken = req.cookies.refreshToken;
 
     if (refreshToken) {
       const decoded = jwt.verify(refreshToken, process.env.REFRESH_TOKEN);
-      await redis.del(`refreshToken:${decoded.userId}`);
+      await deleteRefreshToken(decoded.userId);
     }
 
     res.clearCookie("accessToken");
     res.clearCookie("refreshToken");
-    res.json({ message: "Logout realizado com sucesso" });
+    return sendSuccess(res, 200, "Logout realizado com sucesso");
   } catch (error) {
-    return res.status(500).json({ message: error.message });
+    return next(error);
   }
 };
 
-export const refreshToken = async (req, res) => {
+export const refreshToken = async (req, res, next) => {
   try {
     const refreshToken = req.cookies.refreshToken;
 
     if (!refreshToken) {
-      return res.status(401).json({ message: "Refresh token ausente" });
+      const error = new Error("Refresh token ausente");
+      error.statusCode = 401;
+      throw error;
     }
 
     const decoded = jwt.verify(refreshToken, process.env.REFRESH_TOKEN);
-    const storedToken = await redis.get(`refreshToken:${decoded.userId}`);
+    const storedToken = await getRefreshToken(decoded.userId);
 
     if (storedToken !== refreshToken) {
-      return res.status(403).json({ message: "Refresh token inválido" });
+      const error = new Error("Refresh token inválido");
+      error.statusCode = 403;
+      throw error;
     }
 
-    const accessToken = jwt.sign({ userId: decoded.userId }, process.env.ACCESS_TOKEN, { expiresIn: "15m" });
+    const accessToken = jwt.sign({ userId: decoded.userId }, process.env.ACCESS_TOKEN, {
+      expiresIn: "15m",
+    });
 
-    setAuthCookie(res, "accessToken", accessToken, 15 * 60 * 1000); // 15 minutos
+    setAuthCookie(res, "accessToken", accessToken, 15 * 60 * 1000);
 
-    res.json({ message: "Token renovado com sucesso" });
+    return sendSuccess(res, 200, "Token renovado com sucesso");
   } catch (error) {
-    return res.status(500).json({ message: error.message });
+    return next(error);
   }
 };
