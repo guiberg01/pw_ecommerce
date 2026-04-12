@@ -13,6 +13,7 @@ import authRoutes from "./routes/auth.route.js";
 import adminRoutes from "./routes/admin.route.js";
 import productRoutes from "./routes/product.route.js";
 import storeRoutes from "./routes/store.route.js";
+import cartRoutes from "./routes/cart.route.js";
 
 // Database
 import { connectDB } from "./config/db.js";
@@ -39,6 +40,9 @@ app.use("/api/products", productRoutes);
 
 // Definindo rota stores
 app.use("/api/stores", storeRoutes);
+
+// Definindo a rota do carrinho
+app.use("/api/cart", cartRoutes);
 
 // Middleware para rotas não encontradas
 app.use((req, res, next) => {
