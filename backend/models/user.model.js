@@ -20,18 +20,6 @@ const userSchema = new mongoose.Schema(
       required: [true, "A senha é obrigatória"],
       minlength: [6, "A senha deve ter pelo menos 6 caracteres"],
     },
-    cart: [
-      {
-        product: {
-          type: mongoose.Schema.Types.ObjectId,
-          ref: "Product",
-        },
-        quantity: {
-          type: Number,
-          default: 1,
-        },
-      },
-    ],
     role: {
       type: String,
       enum: ["customer", "seller", "admin"],
