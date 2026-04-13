@@ -9,16 +9,16 @@ import {
   softDeleteStore,
 } from "../services/catalog.service.js";
 
-const buildSlugCandidate = (name, suffix = 0) => {
+const buildSlugCandidate = (name, attempt = 0) => {
   const base = slugify(name);
-  return suffix === 0 ? base : `${base}-${suffix}`;
+  return attempt === 0 ? base : `${base}-${attempt}`;
 };
 
 const MAX_SLUG_RETRIES = 5;
 
 const saveStoreWithUniqueSlug = async (store, name) => {
   for (let attempt = 0; attempt < MAX_SLUG_RETRIES; attempt++) {
-    store.slug = buildSlugCandidate(name, attempt === 0 ? 0 : attempt);
+    store.slug = buildSlugCandidate(name, attempt);
     try {
       await store.save();
       return true;
@@ -29,7 +29,6 @@ const saveStoreWithUniqueSlug = async (store, name) => {
       throw err;
     }
   }
-
   return false;
 };
 
@@ -46,12 +45,11 @@ export const createStore = async (req, res, next) => {
 
     if (deletedStore) {
       deletedStore.name = name;
-      deletedStore.description = description;
-      deletedStore.logoUrl = logoUrl;
+      deletedStore.description = description ?? "";
+      deletedStore.logoUrl = logoUrl ?? "";
       deletedStore.status = "active";
 
       const slugSaved = await saveStoreWithUniqueSlug(deletedStore, name);
-
       if (!slugSaved) {
         throw createHttpError(
           "Não foi possível gerar um slug único para a loja",
@@ -61,17 +59,15 @@ export const createStore = async (req, res, next) => {
         );
       }
 
-      return sendSuccess(res, 200, "Loja reativada com sucesso", deletedStore);
+      return sendSuccess(res, 201, "Loja criada com sucesso", deletedStore);
     }
 
     let store;
-
     for (let attempt = 0; attempt < MAX_SLUG_RETRIES; attempt++) {
-      const slug = buildSlugCandidate(name, attempt === 0 ? 0 : attempt);
       try {
         store = await Store.create({
           name,
-          slug,
+          slug: buildSlugCandidate(name, attempt),
           description,
           logoUrl,
           owner: req.user._id,
@@ -103,7 +99,6 @@ export const createStore = async (req, res, next) => {
 export const getMyStore = async (req, res, next) => {
   try {
     const store = await findActiveStoreByOwnerOrThrow(req.user._id);
-
     return sendSuccess(res, 200, "Loja encontrada com sucesso", store);
   } catch (error) {
     return next(error);
@@ -114,7 +109,6 @@ export const getStoreById = async (req, res, next) => {
   try {
     const { storeId } = req.params;
     const store = await findStoreByIdOrThrow(storeId);
-
     return sendSuccess(res, 200, "Loja encontrada com sucesso", store);
   } catch (error) {
     return next(error);
@@ -126,29 +120,27 @@ export const updateMyStore = async (req, res, next) => {
     const { name, description, logoUrl } = req.body;
 
     const store = await findActiveStoreByOwnerOrThrow(req.user._id);
-    let slugSaved = true;
-    let shouldSave = false;
+
+    if (description !== undefined) store.description = description;
+    if (logoUrl !== undefined) store.logoUrl = logoUrl;
 
     if (name && name !== store.name) {
       store.name = name;
-      slugSaved = await saveStoreWithUniqueSlug(store, name);
+
+      const slugSaved = await saveStoreWithUniqueSlug(store, name);
+      if (!slugSaved) {
+        throw createHttpError(
+          "Não foi possível gerar um slug único para a loja",
+          409,
+          undefined,
+          "STORE_SLUG_CONFLICT",
+        );
+      }
+
+      return sendSuccess(res, 200, "Loja atualizada com sucesso", store);
     }
 
-    if (!slugSaved) {
-      throw createHttpError("Não foi possível gerar um slug único para a loja", 409, undefined, "STORE_SLUG_CONFLICT");
-    }
-
-    if (description !== undefined) {
-      store.description = description;
-      shouldSave = true;
-    }
-
-    if (logoUrl !== undefined) {
-      store.logoUrl = logoUrl;
-      shouldSave = true;
-    }
-
-    if (shouldSave) {
+    if (description !== undefined || logoUrl !== undefined) {
       await store.save();
     }
 

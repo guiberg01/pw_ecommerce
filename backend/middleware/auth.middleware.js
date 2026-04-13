@@ -64,6 +64,6 @@ export const optionalAuth = async (req, res, next) => {
 
     return next();
   } catch (error) {
-    return next();
+    return next(error);
   }
 };
