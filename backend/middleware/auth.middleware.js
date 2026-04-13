@@ -1,23 +1,24 @@
 import jwt from "jsonwebtoken";
 import User from "../models/user.model.js";
+import { createHttpError } from "../helpers/httpError.js";
+
+const resolveUserFromAccessToken = async (accessToken) => {
+  if (!accessToken) return null;
+
+  const decoded = jwt.verify(accessToken, process.env.ACCESS_TOKEN);
+  return User.findById(decoded.userId).select("-password");
+};
 
 export const isLoggedIn = async (req, res, next) => {
   try {
-    const accessToken = req.cookies.accessToken;
-
-    if (!accessToken) {
-      const error = new Error("Não autorizado - Token inválido ou ausente");
-      error.statusCode = 401;
-      throw error;
+    if (!req.cookies.accessToken) {
+      throw createHttpError("Não autorizado - Token inválido ou ausente", 401, undefined, "AUTH_TOKEN_MISSING");
     }
 
-    const decoded = jwt.verify(accessToken, process.env.ACCESS_TOKEN);
-    const user = await User.findById(decoded.userId).select("-password");
+    const user = await resolveUserFromAccessToken(req.cookies.accessToken);
 
     if (!user) {
-      const error = new Error("Não autorizado - Usuário não encontrado");
-      error.statusCode = 401;
-      throw error;
+      throw createHttpError("Não autorizado - Usuário não encontrado", 401, undefined, "AUTH_USER_NOT_FOUND");
     }
 
     req.user = user;
@@ -32,15 +33,11 @@ export const authorizeRoles = (...allowedRoles) => {
   return (req, res, next) => {
     try {
       if (!req.user) {
-        const error = new Error("Não autorizado - Usuário não encontrado");
-        error.statusCode = 401;
-        throw error;
+        throw createHttpError("Não autorizado - Usuário não encontrado", 401, undefined, "AUTH_USER_NOT_FOUND");
       }
 
       if (!allowedRoles.includes(req.user.role)) {
-        const error = new Error("Acesso proibido - Permissão insuficiente");
-        error.statusCode = 403;
-        throw error;
+        throw createHttpError("Acesso proibido - Permissão insuficiente", 403, undefined, "AUTH_ROLE_FORBIDDEN");
       }
 
       next();
@@ -52,3 +49,21 @@ export const authorizeRoles = (...allowedRoles) => {
 
 export const isAdmin = authorizeRoles("admin");
 export const isSeller = authorizeRoles("seller");
+
+export const optionalAuth = async (req, res, next) => {
+  try {
+    if (!req.cookies.accessToken) {
+      return next();
+    }
+
+    const user = await resolveUserFromAccessToken(req.cookies.accessToken);
+
+    if (user) {
+      req.user = user;
+    }
+
+    return next();
+  } catch (error) {
+    return next();
+  }
+};
