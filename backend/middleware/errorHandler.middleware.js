@@ -4,13 +4,7 @@ export const errorHandler = (err, req, res, next) => {
   console.error(err);
 
   if (err.code === "REDIS_UNAVAILABLE") {
-    return sendError(
-      res,
-      503,
-      "Serviço de autenticação temporariamente indisponível",
-      "REDIS_UNAVAILABLE",
-      err.details,
-    );
+    return sendError(res, 503, "Serviço Redis temporariamente indisponível", "REDIS_UNAVAILABLE", err.details);
   }
 
   if (err.name === "TokenExpiredError") {
@@ -38,7 +32,7 @@ export const errorHandler = (err, req, res, next) => {
   }
 
   if (err.statusCode) {
-    return sendError(res, err.statusCode, err.message, "APPLICATION_ERROR", err.details);
+    return sendError(res, err.statusCode, err.message, err.code ?? "APPLICATION_ERROR", err.details);
   }
 
   return sendError(res, 500, "Erro interno do servidor", "INTERNAL_SERVER_ERROR");

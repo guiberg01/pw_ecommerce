@@ -1,6 +1,5 @@
 import { z } from "zod";
-
-const mongoId = z.string().regex(/^[a-f\d]{24}$/i, "Identificador inválido");
+import { mongoIdSchema } from "./common.validator.js";
 
 export const createStoreSchema = z.object({
   name: z.string().trim().min(1, "Nome da loja é obrigatório"),
@@ -23,5 +22,5 @@ export const updateStoreStatusByAdminSchema = z.object({
 });
 
 export const storeIdParamSchema = z.object({
-  storeId: mongoId,
+  storeId: mongoIdSchema,
 });
