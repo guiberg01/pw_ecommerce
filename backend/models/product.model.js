@@ -58,6 +58,12 @@ const productSchema = new mongoose.Schema(
       enum: ["available", "blocked", "deleted", "unavailable", "cancelled"],
       default: "available",
     },
+    rating: {
+      type: Number,
+      default: 0,
+      min: 0,
+      max: 5,
+    },
   },
   { timestamps: true },
 );

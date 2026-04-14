@@ -1,5 +1,5 @@
 import { Router } from "express";
-import { allProducts, updateProduct, deleteProduct } from "../controllers/product.controller.js";
+import { allProducts, getProductById, updateProduct, deleteProduct } from "../controllers/product.controller.js";
 import { isLoggedIn, isSeller } from "../middleware/auth.middleware.js";
 import { validateBody, validateParams } from "../middleware/validation.middleware.js";
 import { productIdParamSchema, updateProductSchema } from "../validators/product.validator.js";
@@ -7,9 +7,8 @@ import { productIdParamSchema, updateProductSchema } from "../validators/product
 const router = Router();
 
 router.get("/", allProducts);
-
+router.get("/:id", validateParams(productIdParamSchema), getProductById);
 router.delete("/:id", isLoggedIn, isSeller, validateParams(productIdParamSchema), deleteProduct);
-
 router.put(
   "/:id",
   isLoggedIn,

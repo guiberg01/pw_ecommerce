@@ -21,6 +21,18 @@ export const getVisibleProducts = async () => {
   });
 };
 
+export const getProduct = async (productId) => {
+  const product = await Product.findOne({ _id: productId, status: { $in: ["available", "unavailable"] } })
+    .populate("store", "name reputation")
+    .lean();
+
+  if (!product) {
+    throw createHttpError("Produto não encontrado", 404, undefined, "PRODUCT_NOT_FOUND");
+  }
+
+  return product;
+};
+
 export const findActiveStoreOrThrow = async (storeId) => {
   const store = await Store.findOne({ _id: storeId, status: { $ne: "deleted" } });
 

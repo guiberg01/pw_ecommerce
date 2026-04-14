@@ -2,6 +2,7 @@ import { sendSuccess } from "../helpers/successResponse.js";
 import { createHttpError } from "../helpers/httpError.js";
 import {
   createProductForStore,
+  getProduct,
   findActiveProductOrThrow,
   findActiveStoreByOwnerOrThrow,
   getVisibleProducts,
@@ -18,6 +19,17 @@ export const allProducts = async (req, res, next) => {
     const visibleProducts = await getVisibleProducts();
 
     return sendSuccess(res, 200, "Produtos listados com sucesso", visibleProducts);
+  } catch (error) {
+    return next(error);
+  }
+};
+
+export const getProductById = async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    const product = await getProduct(id);
+
+    return sendSuccess(res, 200, "Produto encontrado com sucesso", product);
   } catch (error) {
     return next(error);
   }
