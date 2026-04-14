@@ -1,6 +1,14 @@
-import Store from "../models/store.model.js";
-import Product from "../models/product.model.js";
 import { sendSuccess } from "../helpers/successResponse.js";
+import {
+  createProductForStore,
+  ensureStoreHasNoActiveProducts,
+  findActiveProductOrThrow,
+  findActiveStoreOrThrow,
+  softDeleteProduct,
+  softDeleteStore,
+  updateProductAndPopulate,
+} from "../services/catalog.service.js";
+import Store from "../models/store.model.js";
 
 export const allStoresForAdmin = async (req, res, next) => {
   try {
@@ -21,17 +29,11 @@ export const allStoresForAdmin = async (req, res, next) => {
 export const createProductForStoreByAdmin = async (req, res, next) => {
   try {
     const { storeId } = req.params;
-    const { name, description, price, imageUrl, category, highlighted, stock } = req.body;
+    const { name, description, price, imageUrl, category, highlighted, stock, maxPerPerson } = req.body;
 
-    const store = await Store.findOne({ _id: storeId, status: { $ne: "deleted" } });
+    await findActiveStoreOrThrow(storeId);
 
-    if (!store) {
-      const error = new Error("Loja não encontrada");
-      error.statusCode = 404;
-      throw error;
-    }
-
-    const product = new Product({
+    const productWithStore = await createProductForStore(storeId, {
       name,
       description,
       price,
@@ -39,12 +41,8 @@ export const createProductForStoreByAdmin = async (req, res, next) => {
       category,
       highlighted,
       stock,
-      store: store._id,
+      maxPerPerson,
     });
-
-    await product.save();
-
-    const productWithStore = await Product.findById(product._id).populate("store", "name slug owner status");
 
     return sendSuccess(res, 201, "Produto criado com sucesso", productWithStore);
   } catch (error) {
@@ -55,23 +53,9 @@ export const createProductForStoreByAdmin = async (req, res, next) => {
 export const deleteStoreByAdmin = async (req, res, next) => {
   try {
     const { storeId } = req.params;
-    const store = await Store.findOne({ _id: storeId, status: { $ne: "deleted" } });
-
-    if (!store) {
-      const error = new Error("Loja não encontrada");
-      error.statusCode = 404;
-      throw error;
-    }
-
-    const hasProduct = await Product.exists({ store: storeId, status: { $ne: "deleted" } });
-
-    if (hasProduct) {
-      const error = new Error("Não é possível deletar uma loja que possui produtos");
-      error.statusCode = 400;
-      throw error;
-    }
-
-    await Store.findByIdAndUpdate(store._id, { status: "deleted" });
+    await findActiveStoreOrThrow(storeId);
+    await ensureStoreHasNoActiveProducts(storeId);
+    await softDeleteStore(storeId);
 
     return sendSuccess(res, 200, "Loja deletada com sucesso");
   } catch (error) {
@@ -82,18 +66,8 @@ export const deleteStoreByAdmin = async (req, res, next) => {
 export const updateProductByAdmin = async (req, res, next) => {
   try {
     const { id } = req.params;
-    const product = await Product.findOne({ _id: id, status: { $ne: "deleted" } });
-
-    if (!product) {
-      const error = new Error("Produto não encontrado");
-      error.statusCode = 404;
-      throw error;
-    }
-
-    Object.assign(product, req.body);
-    await product.save();
-
-    const updatedProduct = await Product.findById(product._id).populate("store", "name slug owner status");
+    const product = await findActiveProductOrThrow(id);
+    const updatedProduct = await updateProductAndPopulate(product, req.body);
 
     return sendSuccess(res, 200, "Produto atualizado com sucesso", updatedProduct);
   } catch (error) {
@@ -104,15 +78,8 @@ export const updateProductByAdmin = async (req, res, next) => {
 export const deleteProductByAdmin = async (req, res, next) => {
   try {
     const { id } = req.params;
-    const product = await Product.findOne({ _id: id, status: { $ne: "deleted" } });
-
-    if (!product) {
-      const error = new Error("Produto não encontrado");
-      error.statusCode = 404;
-      throw error;
-    }
-
-    await Product.findByIdAndUpdate(id, { status: "deleted" });
+    await findActiveProductOrThrow(id);
+    await softDeleteProduct(id);
 
     return sendSuccess(res, 200, "Produto removido com sucesso");
   } catch (error) {
@@ -125,13 +92,7 @@ export const updateStoreStatusByAdmin = async (req, res, next) => {
     const { storeId } = req.params;
     const { status } = req.body;
 
-    const store = await Store.findOne({ _id: storeId, status: { $ne: "deleted" } });
-
-    if (!store) {
-      const error = new Error("Loja não encontrada");
-      error.statusCode = 404;
-      throw error;
-    }
+    const store = await findActiveStoreOrThrow(storeId);
 
     store.status = status;
     await store.save();

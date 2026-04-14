@@ -38,6 +38,21 @@ const productSchema = new mongoose.Schema(
       required: [true, "A quantidade em estoque do produto é obrigatória"],
       min: [0, "A quantidade em estoque do produto não pode ser negativa"],
     },
+    maxPerPerson: {
+      type: Number,
+      min: [1, "Limite máximo deve ser ao menos 1"],
+      validate: {
+        validator: function (value) {
+          if (value == null || this.stock == null) {
+            return true;
+          }
+
+          return value <= this.stock;
+        },
+        message: "O limite máximo por pessoa não pode ser maior que o estoque",
+      },
+      default: null,
+    },
     status: {
       type: String,
       enum: ["available", "blocked", "deleted", "unavailable", "cancelled"],
@@ -46,6 +61,8 @@ const productSchema = new mongoose.Schema(
   },
   { timestamps: true },
 );
+
+productSchema.index({ status: 1, store: 1 });
 
 const Product = mongoose.model("Product", productSchema);
 

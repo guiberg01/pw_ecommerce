@@ -1,15 +1,22 @@
+import { createHttpError } from "../helpers/httpError.js";
+
 const validate = (schema, target) => {
   return (req, res, next) => {
     const result = schema.safeParse(req[target]);
 
     if (!result.success) {
-      const validationError = new Error("Requisição inválida - Falha na validação");
-      validationError.statusCode = 400;
+      const validationError = createHttpError(
+        "Requisição inválida - Falha na validação",
+        400,
+        undefined,
+        "REQUEST_VALIDATION_FAILED",
+      );
       validationError.details = result.error.flatten();
       return next(validationError);
     }
 
-    req[target] = result.data;
+    Object.assign(req[target], result.data);
+
     next();
   };
 };
