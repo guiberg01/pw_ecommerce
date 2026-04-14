@@ -55,6 +55,7 @@ app.use("/api/admin", adminRoutes);
 app.use("/api/products", productRoutes);
 app.use("/api/stores", storeRoutes);
 app.use("/api/cart", cartRoutes);
+app.use("/api/coupons", couponRoutes);
 
 app.use((req, res, next) => {
   next(createHttpError("Rota não encontrada", 404, undefined, "ROUTE_NOT_FOUND"));
