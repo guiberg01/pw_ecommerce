@@ -56,10 +56,9 @@ const couponSchema = new mongoose.Schema(
     },
     status: {
       type: String,
-      enum: ["active", "inactive"],
+      enum: ["active", "inactive", "expired", "sold-out"],
       default: "active",
     },
-
     createdBy: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "User",
