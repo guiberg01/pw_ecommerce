@@ -11,6 +11,7 @@ import adminRoutes from "./routes/admin.route.js";
 import productRoutes from "./routes/product.route.js";
 import storeRoutes from "./routes/store.route.js";
 import cartRoutes from "./routes/cart.route.js";
+import couponRoutes from "./routes/coupon.route.js";
 
 import { connectDB, disconnectDB } from "./config/db.js";
 import { disconnectRedis } from "./config/redis.js";
