@@ -15,7 +15,7 @@ const validate = (schema, target) => {
       return next(validationError);
     }
 
-    Object.assign(req[target], result.data);
+    req[target] = result.data;
 
     next();
   };
