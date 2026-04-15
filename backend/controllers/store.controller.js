@@ -1,95 +1,18 @@
 import Store from "../models/store.model.js";
-import { slugify } from "../helpers/slug.js";
 import { createHttpError } from "../helpers/httpError.js";
 import { sendSuccess } from "../helpers/successResponse.js";
 import {
   ensureStoreHasNoActiveProducts,
+  createStores,
   findActiveStoreByOwnerOrThrow,
   findStoreByIdOrThrow,
   softDeleteStore,
+  updateStoreForOwner,
 } from "../services/catalog.service.js";
-
-const buildSlugCandidate = (name, attempt = 0) => {
-  const base = slugify(name);
-  return attempt === 0 ? base : `${base}-${attempt}`;
-};
-
-const MAX_SLUG_RETRIES = 5;
-
-const saveStoreWithUniqueSlug = async (store, name) => {
-  for (let attempt = 0; attempt < MAX_SLUG_RETRIES; attempt++) {
-    store.slug = buildSlugCandidate(name, attempt);
-    try {
-      await store.save();
-      return true;
-    } catch (err) {
-      if (err?.name === "MongoServerError" && err?.code === 11000 && err?.keyValue?.slug) {
-        continue;
-      }
-      throw err;
-    }
-  }
-  return false;
-};
 
 export const createStore = async (req, res, next) => {
   try {
-    const { name, description, logoUrl } = req.body;
-
-    const existingStore = await Store.findOne({ owner: req.user._id, status: { $ne: "deleted" } });
-    if (existingStore) {
-      throw createHttpError("Este seller já possui uma loja", 409, undefined, "STORE_ALREADY_EXISTS");
-    }
-
-    const deletedStore = await Store.findOne({ owner: req.user._id, status: "deleted" }).sort({ updatedAt: -1 });
-
-    if (deletedStore) {
-      deletedStore.name = name;
-      deletedStore.description = description ?? "";
-      deletedStore.logoUrl = logoUrl ?? "";
-      deletedStore.status = "active";
-
-      const slugSaved = await saveStoreWithUniqueSlug(deletedStore, name);
-      if (!slugSaved) {
-        throw createHttpError(
-          "Não foi possível gerar um slug único para a loja",
-          409,
-          undefined,
-          "STORE_SLUG_CONFLICT",
-        );
-      }
-
-      return sendSuccess(res, 201, "Loja criada com sucesso", deletedStore);
-    }
-
-    let store;
-    for (let attempt = 0; attempt < MAX_SLUG_RETRIES; attempt++) {
-      try {
-        store = await Store.create({
-          name,
-          slug: buildSlugCandidate(name, attempt),
-          description,
-          logoUrl,
-          owner: req.user._id,
-        });
-        break;
-      } catch (err) {
-        if (err?.name === "MongoServerError" && err?.code === 11000 && err?.keyValue?.slug) {
-          continue;
-        }
-
-        if (err?.name === "MongoServerError" && err?.code === 11000 && err?.keyValue?.owner) {
-          throw createHttpError("Este seller já possui uma loja", 409, undefined, "STORE_ALREADY_EXISTS");
-        }
-
-        throw err;
-      }
-    }
-
-    if (!store) {
-      throw createHttpError("Não foi possível gerar um slug único para a loja", 409, undefined, "STORE_SLUG_CONFLICT");
-    }
-
+    const store = await createStores(req.user._id, req.body);
     return sendSuccess(res, 201, "Loja criada com sucesso", store);
   } catch (error) {
     return next(error);
@@ -117,33 +40,7 @@ export const getStoreById = async (req, res, next) => {
 
 export const updateMyStore = async (req, res, next) => {
   try {
-    const { name, description, logoUrl } = req.body;
-
-    const store = await findActiveStoreByOwnerOrThrow(req.user._id);
-
-    if (description !== undefined) store.description = description;
-    if (logoUrl !== undefined) store.logoUrl = logoUrl;
-
-    if (name && name !== store.name) {
-      store.name = name;
-
-      const slugSaved = await saveStoreWithUniqueSlug(store, name);
-      if (!slugSaved) {
-        throw createHttpError(
-          "Não foi possível gerar um slug único para a loja",
-          409,
-          undefined,
-          "STORE_SLUG_CONFLICT",
-        );
-      }
-
-      return sendSuccess(res, 200, "Loja atualizada com sucesso", store);
-    }
-
-    if (description !== undefined || logoUrl !== undefined) {
-      await store.save();
-    }
-
+    const store = await updateStoreForOwner(req.user._id, req.body);
     return sendSuccess(res, 200, "Loja atualizada com sucesso", store);
   } catch (error) {
     return next(error);

@@ -15,7 +15,6 @@ import { storeIdParamSchema, updateStoreStatusByAdminSchema } from "../validator
 const router = Router();
 
 router.get("/stores", isLoggedIn, isAdmin, allStoresForAdmin);
-
 router.post(
   "/stores/:storeId/products",
   isLoggedIn,
@@ -24,7 +23,6 @@ router.post(
   validateBody(createProductSchema),
   createProductForStoreByAdmin,
 );
-
 router.put(
   "/stores/:storeId/status",
   isLoggedIn,
@@ -33,9 +31,7 @@ router.put(
   validateBody(updateStoreStatusByAdminSchema),
   updateStoreStatusByAdmin,
 );
-
 router.delete("/stores/:storeId", isLoggedIn, isAdmin, validateParams(storeIdParamSchema), deleteStoreByAdmin);
-
 router.put(
   "/products/:id",
   isLoggedIn,
@@ -44,7 +40,6 @@ router.put(
   validateBody(updateProductSchema),
   updateProductByAdmin,
 );
-
 router.delete("/products/:id", isLoggedIn, isAdmin, validateParams(productIdParamSchema), deleteProductByAdmin);
 
 export default router;
