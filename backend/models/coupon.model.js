@@ -1,4 +1,5 @@
 import mongoose from "mongoose";
+import "./category.model.js";
 
 const couponSchema = new mongoose.Schema(
   {
@@ -49,10 +50,33 @@ const couponSchema = new mongoose.Schema(
       type: Date,
       default: null,
     },
-    store: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: "Store",
-      default: null,
+    products: {
+      type: [
+        {
+          type: mongoose.Schema.Types.ObjectId,
+          ref: "Product",
+        },
+      ],
+      default: [],
+    },
+    stores: {
+      type: [
+        {
+          type: mongoose.Schema.Types.ObjectId,
+          ref: "Store",
+          default: null,
+        },
+      ],
+      default: [],
+    },
+    categories: {
+      type: [
+        {
+          type: mongoose.Schema.Types.ObjectId,
+          ref: "Category",
+        },
+      ],
+      default: [],
     },
     status: {
       type: String,
@@ -69,7 +93,8 @@ const couponSchema = new mongoose.Schema(
 );
 
 couponSchema.index({ expiresAt: 1 });
-couponSchema.index({ store: 1 });
+couponSchema.index({ stores: 1 });
+couponSchema.index({ categories: 1 });
 
 const Coupon = mongoose.model("Coupon", couponSchema);
 
