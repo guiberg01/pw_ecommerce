@@ -15,6 +15,7 @@ import couponRoutes from "./routes/coupon.route.js";
 
 import { connectDB, disconnectDB } from "./config/db.js";
 import { disconnectRedis } from "./config/redis.js";
+import { startCouponExpirationScheduler } from "./jobs/couponExpiration.job.js";
 
 dotenv.config();
 
@@ -47,6 +48,7 @@ const app = express();
 const PORT = process.env.PORT || 3980;
 let httpServer;
 let shuttingDown = false;
+let stopCouponExpirationScheduler;
 
 app.use(express.json());
 app.use(cookieParser());
@@ -68,6 +70,7 @@ const bootstrap = async () => {
   try {
     validateRequiredEnv();
     await connectDB();
+    stopCouponExpirationScheduler = startCouponExpirationScheduler();
 
     httpServer = app.listen(PORT, () => {
       console.log(`Server rodando em: http://localhost:${PORT}`);
@@ -85,6 +88,10 @@ const gracefulShutdown = async (signal) => {
   console.log(`Recebido ${signal}. Encerrando aplicação...`);
 
   try {
+    if (stopCouponExpirationScheduler) {
+      stopCouponExpirationScheduler();
+    }
+
     if (httpServer) {
       await new Promise((resolve, reject) => {
         httpServer.close((error) => {
