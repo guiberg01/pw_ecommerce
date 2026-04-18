@@ -1,4 +1,5 @@
 import Product from "../models/product.model.js";
+import ProductVariant from "../models/productVariant.model.js";
 import Store from "../models/store.model.js";
 import { createHttpError } from "../helpers/httpError.js";
 import {
@@ -9,6 +10,135 @@ import {
 
 const PRODUCT_RESPONSE_POPULATE = "store name slug owner status";
 const MAX_SLUG_RETRIES = 5;
+const PRODUCT_FIELDS = ["name", "description", "category", "highlighted", "maxPerPerson", "status"];
+const VARIANT_FIELDS = [
+  "attributes",
+  "price",
+  "stock",
+  "sku",
+  "imageUrl",
+  "datasheet",
+  "weight",
+  "length",
+  "width",
+  "height",
+];
+
+const populateProductById = (productId) =>
+  Product.findById(productId)
+    .populate({
+      path: "store",
+      select: PRODUCT_RESPONSE_POPULATE,
+      match: { status: "active" },
+    })
+    .populate("category", "name status")
+    .populate("mainVariant")
+    .populate("productVariants");
+
+const normalizeAttributes = (attributes) => {
+  if (!attributes || typeof attributes !== "object") return {};
+  return { ...attributes };
+};
+
+const normalizeVariantInput = (variantInput = {}) => {
+  const normalizedVariant = {};
+
+  if (variantInput.attributes !== undefined)
+    normalizedVariant.attributes = normalizeAttributes(variantInput.attributes);
+  if (variantInput.price !== undefined) normalizedVariant.price = variantInput.price;
+  if (variantInput.stock !== undefined) normalizedVariant.stock = variantInput.stock;
+  if (variantInput.sku !== undefined) {
+    normalizedVariant.sku =
+      typeof variantInput.sku === "string" ? variantInput.sku.trim().toUpperCase() : variantInput.sku;
+  }
+  if (variantInput.imageUrl !== undefined) normalizedVariant.imageUrl = variantInput.imageUrl;
+  if (variantInput.datasheet !== undefined) normalizedVariant.datasheet = variantInput.datasheet;
+  if (variantInput.weight !== undefined) normalizedVariant.weight = variantInput.weight;
+  if (variantInput.length !== undefined) normalizedVariant.length = variantInput.length;
+  if (variantInput.width !== undefined) normalizedVariant.width = variantInput.width;
+  if (variantInput.height !== undefined) normalizedVariant.height = variantInput.height;
+
+  return normalizedVariant;
+};
+
+const extractProductPayload = (payload = {}) => {
+  const productPayload = {};
+
+  for (const field of PRODUCT_FIELDS) {
+    if (payload[field] !== undefined) {
+      productPayload[field] = field === "category" ? [payload[field]] : payload[field];
+    }
+  }
+
+  return productPayload;
+};
+
+const extractMainVariantPayload = (payload = {}) => {
+  if (payload.mainVariant) {
+    return normalizeVariantInput(payload.mainVariant);
+  }
+
+  const hasLegacyVariantField = VARIANT_FIELDS.some((field) => payload[field] !== undefined);
+  if (!hasLegacyVariantField) {
+    return null;
+  }
+
+  return normalizeVariantInput(payload);
+};
+
+const extractExtraVariantsPayload = (payload = {}) => {
+  if (!Array.isArray(payload.variants)) {
+    return [];
+  }
+
+  return payload.variants.map((variantInput) => normalizeVariantInput(variantInput));
+};
+
+const cleanupCreatedProduct = async (productId) => {
+  await ProductVariant.deleteMany({ product: productId });
+  await Product.findByIdAndDelete(productId);
+};
+
+const syncProductVariants = async (productId, mainVariantPayload, extraVariantsPayload = []) => {
+  if (mainVariantPayload) {
+    const mainVariant = await ProductVariant.findOne({ product: productId, isMainVariant: true });
+
+    if (mainVariant) {
+      Object.assign(mainVariant, mainVariantPayload, { isMainVariant: true, product: productId });
+      await mainVariant.save();
+    } else {
+      await ProductVariant.create({
+        ...mainVariantPayload,
+        product: productId,
+        isMainVariant: true,
+      });
+    }
+  }
+
+  for (const variantPayload of extraVariantsPayload) {
+    if (variantPayload._id) {
+      const existingVariant = await ProductVariant.findOne({
+        _id: variantPayload._id,
+        product: productId,
+        isMainVariant: false,
+      });
+
+      if (!existingVariant) {
+        throw createHttpError("Variação do produto não encontrada", 404, undefined, "PRODUCT_VARIANT_NOT_FOUND");
+      }
+
+      Object.assign(existingVariant, variantPayload, { product: productId, isMainVariant: false });
+      await existingVariant.save();
+      continue;
+    }
+
+    await ProductVariant.create({
+      ...variantPayload,
+      product: productId,
+      isMainVariant: false,
+    });
+  }
+};
 
 export const getVisibleProducts = async () => {
   const activeStoreIds = await Store.find({ status: "active" }).distinct("_id");
@@ -26,13 +156,17 @@ export const getVisibleProducts = async () => {
       select: "name slug owner status",
       match: { status: "active" },
     })
-    .populate("category", "name status");
+    .populate("category", "name status")
+    .populate("mainVariant")
+    .populate("productVariants");
 };
 
 export const getProduct = async (productId) => {
   const product = await Product.findOne({ _id: productId, status: "active" })
     .populate("store", "name reputation")
-    .populate("category", "name status");
+    .populate("category", "name status")
+    .populate("mainVariant")
+    .populate("productVariants");
 
   if (!product) {
     throw createHttpError("Produto não encontrado", 404, undefined, "PRODUCT_NOT_FOUND");
@@ -173,14 +307,30 @@ export const softDeleteStore = async (storeId) => {
 };
 
 export const createProductForStore = async (storeId, payload) => {
+  const productPayload = extractProductPayload(payload);
+  const mainVariantPayload = extractMainVariantPayload(payload);
+  const extraVariantsPayload = extractExtraVariantsPayload(payload);
+
+  if (!mainVariantPayload) {
+    throw createHttpError("A variação principal é obrigatória", 400, undefined, "PRODUCT_MAIN_VARIANT_REQUIRED");
+  }
+
   const product = new Product({
-    ...payload,
+    ...productPayload,
+    basePrice: mainVariantPayload.price,
+    mainImageUrl: mainVariantPayload.imageUrl,
     store: storeId,
   });
 
   await product.save();
 
-  return Product.findById(product._id).populate("store", PRODUCT_RESPONSE_POPULATE).populate("category", "name status");
+  try {
+    await syncProductVariants(product._id, mainVariantPayload, extraVariantsPayload);
+    return populateProductById(product._id);
+  } catch (error) {
+    await cleanupCreatedProduct(product._id);
+    throw error;
+  }
 };
 
 export const findActiveProductOrThrow = async (productId, { populateStoreOwner = false } = {}) => {
@@ -200,10 +350,28 @@ export const findActiveProductOrThrow = async (productId, { populateStoreOwner =
 };
 
 export const updateProductAndPopulate = async (product, payload) => {
-  Object.assign(product, payload);
-  await product.save();
+  const productPayload = extractProductPayload(payload);
+  const mainVariantPayload = extractMainVariantPayload(payload);
+  const extraVariantsPayload = extractExtraVariantsPayload(payload);
 
-  return Product.findById(product._id).populate("store", PRODUCT_RESPONSE_POPULATE).populate("category", "name status");
+  if (mainVariantPayload?.price !== undefined) {
+    productPayload.basePrice = mainVariantPayload.price;
+  }
+
+  if (mainVariantPayload?.imageUrl !== undefined) {
+    productPayload.mainImageUrl = mainVariantPayload.imageUrl;
+  }
+
+  if (Object.keys(productPayload).length > 0) {
+    Object.assign(product, productPayload);
+    await product.save();
+  }
+
+  if (mainVariantPayload || extraVariantsPayload.length > 0) {
+    await syncProductVariants(product._id, mainVariantPayload, extraVariantsPayload);
+  }
+
+  return populateProductById(product._id);
 };
 
 export const softDeleteProduct = async (productId) => {

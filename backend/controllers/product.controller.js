@@ -37,18 +37,17 @@ export const getProductById = async (req, res, next) => {
 
 export const createProductForMyStore = async (req, res, next) => {
   try {
-    const { name, description, price, imageUrl, category, highlighted, stock, maxPerPerson } = req.body;
+    const { name, description, category, highlighted, maxPerPerson, mainVariant, variants } = req.body;
 
     const store = await findActiveStoreByOwnerOrThrow(req.user._id);
     const productWithStore = await createProductForStore(store._id, {
       name,
       description,
-      price,
-      imageUrl,
       category,
       highlighted,
-      stock,
       maxPerPerson,
+      mainVariant,
+      variants,
     });
 
     return sendSuccess(res, 201, "Produto criado com sucesso", productWithStore);

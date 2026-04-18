@@ -54,16 +54,6 @@ const productSchema = new mongoose.Schema(
     maxPerPerson: {
       type: Number,
       min: [1, "Limite máximo deve ser ao menos 1"],
-      validate: {
-        validator: function (value) {
-          if (value == null || this.stock == null) {
-            return true;
-          }
-
-          return value <= this.stock;
-        },
-        message: "O limite máximo por pessoa não pode ser maior que o estoque",
-      },
       default: null,
     },
     status: {
@@ -113,6 +103,14 @@ productSchema.virtual("productVariants", {
   ref: "ProductVariant",
   localField: "_id",
   foreignField: "product",
+});
+
+productSchema.virtual("mainVariant", {
+  ref: "ProductVariant",
+  localField: "_id",
+  foreignField: "product",
+  justOne: true,
+  match: { isMainVariant: true },
 });
 
 productSchema.virtual("rating.average").get(function () {

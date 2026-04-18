@@ -1,41 +1,83 @@
 import { z } from "zod";
 import { mongoIdSchema } from "./common.validator.js";
 
-//zod pra validações
+const productVariantSchema = z.object({
+  attributes: z.record(z.string(), z.string()).optional().default({}),
+  price: z.number().positive("Preço deve ser maior que zero"),
+  stock: z.number().int().min(0, "Estoque deve ser maior ou igual a zero"),
+  sku: z
+    .string()
+    .trim()
+    .min(1, "SKU é obrigatório")
+    .transform((value) => value.toUpperCase()),
+  imageUrl: z.url("A imagem deve ser uma URL válida").trim(),
+  datasheet: z.string().trim().optional().nullable(),
+  weight: z.number().min(0, "Peso deve ser maior ou igual a zero").optional().nullable(),
+  length: z.number().min(0, "Comprimento deve ser maior ou igual a zero").optional().nullable(),
+  width: z.number().min(0, "Largura deve ser maior ou igual a zero").optional().nullable(),
+  height: z.number().min(0, "Altura deve ser maior ou igual a zero").optional().nullable(),
+});
 
-//criar
 export const createProductSchema = z
   .object({
     name: z.string().trim().min(1, "Nome é obrigatório"),
     description: z.string().trim().min(1, "Descrição é obrigatória"),
-    price: z.number().positive("Preço deve ser maior que zero"),
-    imageUrl: z.url("A imagem deve ser uma URL válida").trim(),
     category: mongoIdSchema,
     highlighted: z.boolean().optional().default(false),
-    stock: z.number().int().min(0, "Estoque deve ser maior ou igual a zero"),
     maxPerPerson: z.number().int().min(1, "Limite máximo deve ser ao menos 1").optional().nullable(),
+    mainVariant: productVariantSchema,
+    variants: z.array(productVariantSchema).optional().default([]),
   })
-  .refine((data) => data.maxPerPerson == null || data.maxPerPerson <= data.stock, {
-    message: "O limite máximo por pessoa não pode ser maior que o estoque",
-    path: ["maxPerPerson"],
+  .superRefine((data, ctx) => {
+    if (data.maxPerPerson != null && data.maxPerPerson > data.mainVariant.stock) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["maxPerPerson"],
+        message: "O limite máximo por pessoa não pode ser maior que o estoque",
+      });
+    }
+
+    const skus = [data.mainVariant.sku, ...data.variants.map((variant) => variant.sku)];
+    if (new Set(skus).size !== skus.length) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["variants"],
+        message: "Não é permitido repetir SKU entre a variação principal e as variações extras",
+      });
+    }
   });
 
-//update
 export const updateProductSchema = z
   .object({
     name: z.string().trim().min(1, "Nome é obrigatório").optional(),
     description: z.string().trim().min(1, "Descrição é obrigatória").optional(),
-    price: z.number().positive("Preço deve ser maior que zero").optional(),
-    imageUrl: z.url("A imagem deve ser uma URL válida").trim().optional(),
     category: mongoIdSchema.optional(),
     highlighted: z.boolean().optional(),
-    stock: z.number().int().min(0, "Estoque deve ser maior ou igual a zero").optional(),
     maxPerPerson: z.number().int().min(1, "Limite máximo deve ser ao menos 1").optional().nullable(),
     status: z.enum(["active", "blocked", "deleted"]).optional(),
+    mainVariant: productVariantSchema.partial().optional(),
+    variants: z.array(productVariantSchema).optional(),
   })
-  .refine((data) => data.maxPerPerson == null || data.stock == null || data.maxPerPerson <= data.stock, {
-    message: "O limite máximo por pessoa não pode ser maior que o estoque",
-    path: ["maxPerPerson"],
+  .superRefine((data, ctx) => {
+    if (data.maxPerPerson != null && data.mainVariant?.stock != null && data.maxPerPerson > data.mainVariant.stock) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["maxPerPerson"],
+        message: "O limite máximo por pessoa não pode ser maior que o estoque",
+      });
+    }
+
+    if (data.mainVariant?.sku || (data.variants?.length ?? 0) > 0) {
+      const skus = [data.mainVariant?.sku, ...(data.variants ?? []).map((variant) => variant.sku)].filter(Boolean);
+
+      if (new Set(skus).size !== skus.length) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["variants"],
+          message: "Não é permitido repetir SKU entre variações",
+        });
+      }
+    }
   })
   .refine((data) => Object.keys(data).length > 0, {
     message: "Envie ao menos um campo para atualização",

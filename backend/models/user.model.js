@@ -27,7 +27,6 @@ const userSchema = new mongoose.Schema(
     cpf: {
       type: String,
       default: null,
-      sparse: true,
       trim: true,
     },
     stripeCustomerId: {
@@ -69,7 +68,7 @@ userSchema.methods.comparePassword = async function (password) {
 };
 
 userSchema.index({ email: 1 }, { unique: true });
-userSchema.index({ cpf: 1 }, { unique: true });
+userSchema.index({ cpf: 1 }, { unique: true, sparse: true });
 
 userSchema.virtual("review", {
   ref: "Review",
