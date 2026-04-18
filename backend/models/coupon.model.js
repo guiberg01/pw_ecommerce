@@ -38,6 +38,11 @@ const couponSchema = new mongoose.Schema(
       type: Number,
       default: null,
     },
+    maxDiscountAmount: {
+      type: Number,
+      default: null,
+      min: 0,
+    },
     usedCount: {
       type: Number,
       default: 0,
@@ -80,8 +85,13 @@ const couponSchema = new mongoose.Schema(
     },
     status: {
       type: String,
-      enum: ["active", "inactive", "expired", "sold-out"],
+      enum: ["active", "inactive", "expired", "sold-out", "deleted"],
       default: "active",
+    },
+    scope: {
+      type: String,
+      enum: ["platform", "store"],
+      default: "platform",
     },
     createdBy: {
       type: mongoose.Schema.Types.ObjectId,
@@ -95,28 +105,9 @@ const couponSchema = new mongoose.Schema(
 couponSchema.index({ expiresAt: 1 });
 couponSchema.index({ stores: 1 });
 couponSchema.index({ categories: 1 });
+couponSchema.index({ scope: 1, status: 1 });
 
 const Coupon = mongoose.model("Coupon", couponSchema);
 
-const couponUsageSchema = new mongoose.Schema(
-  {
-    coupon: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: "Coupon",
-      required: true,
-    },
-    user: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: "User",
-      required: true,
-    },
-    //PROVAVEL QUANDO TER ORDER: order: { type: mongoose.Schema.Types.ObjectId, ref: "Order" },
-  },
-  { timestamps: true },
-);
-
-couponUsageSchema.index({ coupon: 1, user: 1 });
-
-const CouponUsage = mongoose.model("CouponUsage", couponUsageSchema);
-
-export { Coupon, CouponUsage };
+export { Coupon };
+export default Coupon;

@@ -31,7 +31,7 @@ export const updateProductSchema = z
     highlighted: z.boolean().optional(),
     stock: z.number().int().min(0, "Estoque deve ser maior ou igual a zero").optional(),
     maxPerPerson: z.number().int().min(1, "Limite máximo deve ser ao menos 1").optional().nullable(),
-    status: z.enum(["available", "blocked", "unavailable", "cancelled"]).optional(),
+    status: z.enum(["active", "blocked", "deleted"]).optional(),
   })
   .refine((data) => data.maxPerPerson == null || data.stock == null || data.maxPerPerson <= data.stock, {
     message: "O limite máximo por pessoa não pode ser maior que o estoque",

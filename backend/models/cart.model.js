@@ -2,9 +2,9 @@ import mongoose from "mongoose";
 
 const cartItemSchema = new mongoose.Schema(
   {
-    product: {
+    productVariant: {
       type: mongoose.Schema.Types.ObjectId,
-      ref: "Product",
+      ref: "ProductVariant",
       required: true,
     },
     quantity: {
@@ -24,6 +24,26 @@ const cartSchema = new mongoose.Schema(
       required: true,
       unique: true,
     },
+    appliedCoupon: {
+      couponId: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: "Coupon",
+        default: null,
+      },
+      code: {
+        type: String,
+        default: null,
+      },
+      discountType: {
+        type: String,
+        enum: ["percentage", "fixed"],
+        default: null,
+      },
+      discountValue: {
+        type: Number,
+        default: null,
+      },
+    },
     items: {
       type: [cartItemSchema],
       default: [],
@@ -35,7 +55,7 @@ const cartSchema = new mongoose.Schema(
             type: Date,
             required: true,
           },
-          productId: {
+          productVariantId: {
             type: String,
             required: true,
           },

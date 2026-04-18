@@ -42,10 +42,10 @@ const appendAuditTrail = (currentAuditTrail = [], auditEvents = []) =>
 const cartItemsEqual = (a = [], b = []) => {
   if (a.length !== b.length) return false;
 
-  const mapA = new Map(a.map((item) => [item.product.toString(), Number(item.quantity)]));
+  const mapA = new Map(a.map((item) => [item.productVariant.toString(), Number(item.quantity)]));
 
   for (const item of b) {
-    if (mapA.get(item.product.toString()) !== Number(item.quantity)) {
+    if (mapA.get(item.productVariant.toString()) !== Number(item.quantity)) {
       return false;
     }
   }
@@ -67,7 +67,7 @@ const getCartTarget = async (req, res) => {
 const toAuditEvents = (removedItems = []) =>
   removedItems.map((item) => ({
     at: new Date(),
-    productId: String(item.productId),
+    productVariantId: String(item.productVariantId),
     reason: String(item.reason),
     quantity: Number(item.quantity ?? 0),
   }));
@@ -90,50 +90,50 @@ const buildCartResponse = async (req, target, items) => {
 };
 
 export const getItemQuantityInCart = (items, productId) => {
-  const match = items.find((item) => item.product?.toString?.() === productId.toString());
+  const match = items.find((item) => item.productVariant?.toString?.() === productId.toString());
   return Number(match?.quantity ?? 0);
 };
 
 export const addProductToCartForRequest = async (req, res, productId, quantity = 1) => {
-  const product = await getProductOrThrow(productId);
+  const productVariant = await getProductOrThrow(productId);
 
-  if (product.stock <= 0) {
+  if (productVariant.stock <= 0) {
     throw createHttpError("Produto sem estoque disponível", 400, undefined, "CART_OUT_OF_STOCK");
   }
 
   return mutateCartForRequest(req, res, (items) => {
-    const currentQuantity = getItemQuantityInCart(items, product._id);
-    const maxAllowed = getMaxQuantityPerPerson(product);
+    const currentQuantity = getItemQuantityInCart(items, productVariant._id);
+    const maxAllowed = getMaxQuantityPerPerson(productVariant);
     const finalQuantity = currentQuantity + Number(quantity);
 
-    if (finalQuantity > maxAllowed || finalQuantity > Number(product.stock)) {
-      const hardLimit = Math.min(maxAllowed, Number(product.stock));
+    if (finalQuantity > maxAllowed || finalQuantity > Number(productVariant.stock)) {
+      const hardLimit = Math.min(maxAllowed, Number(productVariant.stock));
       throw createHttpError(
         `Quantidade máxima por pessoa: ${hardLimit}`,
         400,
-        { hardLimit, productId: product._id.toString() },
+        { hardLimit, productId: productVariant._id.toString() },
         "CART_MAX_PER_PERSON_EXCEEDED",
       );
     }
 
-    return upsertCartItem(items, product._id, quantity, { increment: true });
+    return upsertCartItem(items, productVariant._id, quantity, { increment: true });
   });
 };
 
 export const updateProductQuantityForRequest = async (req, res, productId, quantity) => {
-  const product = await getProductOrThrow(productId);
+  const productVariant = await getProductOrThrow(productId);
 
-  if (product.stock <= 0) {
+  if (productVariant.stock <= 0) {
     throw createHttpError("Produto sem estoque disponível", 400, undefined, "CART_OUT_OF_STOCK");
   }
 
-  const maxAllowed = getMaxQuantityPerPerson(product);
-  const hardLimit = Math.min(maxAllowed, Number(product.stock));
+  const maxAllowed = getMaxQuantityPerPerson(productVariant);
+  const hardLimit = Math.min(maxAllowed, Number(productVariant.stock));
   if (quantity > hardLimit) {
     throw createHttpError(
       `Quantidade máxima por pessoa: ${hardLimit}`,
       400,
-      { hardLimit, productId: product._id.toString() },
+      { hardLimit, productId: productVariant._id.toString() },
       "CART_MAX_PER_PERSON_EXCEEDED",
     );
   }

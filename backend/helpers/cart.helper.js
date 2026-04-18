@@ -1,6 +1,6 @@
 import { randomUUID } from "crypto";
 import Cart from "../models/cart.model.js";
-import Product from "../models/product.model.js";
+import ProductVariant from "../models/productVariant.model.js";
 import { redis } from "../config/redis.js";
 import { createHttpError } from "./httpError.js";
 import { createRedisUnavailableError } from "./redisError.helper.js";
@@ -12,7 +12,8 @@ const GUEST_CART_SYNC_LOCK_TTL_SECONDS = 30;
 const guestCartKey = (cartId) => `guestCart:${cartId}`;
 const guestCartSyncLockKey = (cartId, userId) => `guestCart:sync:lock:${cartId}:${userId}`;
 
-const getCartItemProductId = (product) => product?._id?.toString?.() ?? product?.toString?.() ?? product;
+const getCartItemVariantId = (productVariant) =>
+  productVariant?._id?.toString?.() ?? productVariant?.toString?.() ?? productVariant;
 
 const cartCookieOptions = {
   httpOnly: true,
@@ -96,75 +97,83 @@ export const mergeCartItems = (existingItems = [], incomingItems = []) => {
   const itemMap = new Map();
 
   for (const item of [...existingItems, ...incomingItems]) {
-    const productId = getCartItemProductId(item.product);
+    const productVariantId = getCartItemVariantId(item.productVariant);
     const quantity = Number(item.quantity ?? 1);
 
-    if (!productId || !Number.isFinite(quantity) || quantity <= 0) continue;
+    if (!productVariantId || !Number.isFinite(quantity) || quantity <= 0) continue;
 
-    itemMap.set(productId, {
-      product: productId,
-      quantity: (itemMap.get(productId)?.quantity ?? 0) + quantity,
+    itemMap.set(productVariantId, {
+      productVariant: productVariantId,
+      quantity: (itemMap.get(productVariantId)?.quantity ?? 0) + quantity,
     });
   }
 
   return Array.from(itemMap.values());
 };
 
-export const getProductOrThrow = async (productId) => {
-  const product = await Product.findOne({ _id: productId, status: { $ne: "deleted" } }).populate("store", "status");
+export const getProductOrThrow = async (productVariantId) => {
+  const productVariant = await ProductVariant.findById(productVariantId).populate({
+    path: "product",
+    populate: {
+      path: "store",
+      select: "status",
+    },
+  });
 
-  if (!product) {
+  if (!productVariant || !productVariant.product) {
     throw createHttpError("Produto não encontrado", 404);
   }
 
-  if (product.store?.status === "deleted") {
+  if (productVariant.product.status === "deleted" || productVariant.product.store?.status === "deleted") {
     throw createHttpError("Produto indisponível", 404);
   }
 
-  return product;
+  return productVariant;
 };
 
 export const hydrateCartItems = async (items = []) => {
-  const productIds = [...new Set(items.map((item) => getCartItemProductId(item.product)).filter(Boolean))];
+  const productVariantIds = [
+    ...new Set(items.map((item) => getCartItemVariantId(item.productVariant)).filter(Boolean)),
+  ];
 
-  if (productIds.length === 0) return { hydratedItems: [], removedItems: [], sanitizedItems: [] };
+  if (productVariantIds.length === 0) return { hydratedItems: [], removedItems: [], sanitizedItems: [] };
 
-  const products = await Product.find({
-    _id: { $in: productIds },
-    status: { $ne: "deleted" },
-  })
-    .populate({
+  const productVariants = await ProductVariant.find({ _id: { $in: productVariantIds } }).populate({
+    path: "product",
+    populate: {
       path: "store",
       select: "name slug owner status",
-      match: { status: { $ne: "deleted" } },
-    })
-    .populate("category", "name status");
+      match: { status: "active" },
+    },
+  });
 
-  const productMap = new Map(products.map((product) => [product._id.toString(), product]));
+  const productVariantMap = new Map(
+    productVariants.map((productVariant) => [productVariant._id.toString(), productVariant]),
+  );
   const hydratedItems = [];
   const removedItems = [];
   const sanitizedItems = [];
 
   for (const item of items) {
-    const product = productMap.get(getCartItemProductId(item.product));
+    const productVariant = productVariantMap.get(getCartItemVariantId(item.productVariant));
     const originalQuantity = Math.trunc(Number(item.quantity ?? 0));
 
-    if (!product || !product.store) {
+    if (!productVariant || !productVariant.product || !productVariant.product.store) {
       removedItems.push({
-        productId: getCartItemProductId(item.product),
-        reason: !product ? "Produto removido" : "Loja indisponível",
+        productVariantId: getCartItemVariantId(item.productVariant),
+        reason: !productVariant ? "Produto removido" : "Loja indisponível",
         quantity: originalQuantity,
       });
       continue;
     }
 
-    const maxAllowed = getMaxQuantityPerPerson(product);
-    const cappedByStock = Math.min(originalQuantity, Number(product.stock ?? 0));
+    const maxAllowed = getMaxQuantityPerPerson(productVariant);
+    const cappedByStock = Math.min(originalQuantity, Number(productVariant.stock ?? 0));
     const normalizedQuantity = Math.min(cappedByStock, maxAllowed);
 
     if (normalizedQuantity <= 0) {
       removedItems.push({
-        productId: product._id.toString(),
+        productVariantId: productVariant._id.toString(),
         reason: "Produto sem estoque disponível",
         quantity: originalQuantity,
       });
@@ -173,19 +182,19 @@ export const hydrateCartItems = async (items = []) => {
 
     if (normalizedQuantity !== originalQuantity) {
       removedItems.push({
-        productId: product._id.toString(),
+        productVariantId: productVariant._id.toString(),
         reason: `Quantidade ajustada para ${normalizedQuantity}`,
         quantity: originalQuantity,
       });
     }
 
     hydratedItems.push({
-      product,
+      productVariant,
       quantity: normalizedQuantity,
     });
 
     sanitizedItems.push({
-      product: product._id.toString(),
+      productVariant: productVariant._id.toString(),
       quantity: normalizedQuantity,
     });
   }
@@ -194,7 +203,7 @@ export const hydrateCartItems = async (items = []) => {
 };
 
 export const getMaxQuantityPerPerson = (product) => {
-  return product?.maxPerPerson ?? product?.stock ?? 1;
+  return product?.product?.maxPerPerson ?? product?.stock ?? 1;
 };
 
 export const sanitizeCartItems = async (items = []) => {
@@ -207,7 +216,7 @@ export const calcCartTotals = (hydratedItems = []) => {
   let itemCount = 0;
 
   for (const item of hydratedItems) {
-    const price = Number(item.product?.price ?? 0);
+    const price = Number(item.productVariant?.price ?? 0);
     const quantity = Number(item.quantity ?? 0);
     totalPrice += price * quantity;
     itemCount += quantity;
@@ -221,19 +230,22 @@ export const calcCartTotals = (hydratedItems = []) => {
 
 export const upsertCartItem = (items = [], productId, quantity, { increment = false } = {}) => {
   const normalizedQuantity = Math.trunc(Number(quantity));
-  const normalizedProductId = getCartItemProductId(productId);
+  const normalizedProductId = getCartItemVariantId(productId);
 
   if (!normalizedProductId || !Number.isFinite(normalizedQuantity)) {
     return items;
   }
 
   const itemMap = new Map(
-    items.map((item) => [getCartItemProductId(item.product), { ...item, product: getCartItemProductId(item.product) }]),
+    items.map((item) => [
+      getCartItemVariantId(item.productVariant),
+      { ...item, productVariant: getCartItemVariantId(item.productVariant) },
+    ]),
   );
   const currentQuantity = Number(itemMap.get(normalizedProductId)?.quantity ?? 0);
 
   itemMap.set(normalizedProductId, {
-    product: normalizedProductId,
+    productVariant: normalizedProductId,
     quantity: increment ? currentQuantity + normalizedQuantity : normalizedQuantity,
   });
 
@@ -241,21 +253,21 @@ export const upsertCartItem = (items = [], productId, quantity, { increment = fa
 };
 
 export const removeCartItem = (items = [], productId) =>
-  items.filter((item) => getCartItemProductId(item.product) !== productId.toString());
+  items.filter((item) => getCartItemVariantId(item.productVariant) !== productId.toString());
 
 export const getMongoCart = async (userId) => {
   return Cart.findOne({ user: userId }).populate({
-    path: "items.product",
-    select: "name price imageUrl category highlighted stock maxPerPerson status store",
+    path: "items.productVariant",
+    select: "product price stock sku imageUrl",
     populate: [
       {
-        path: "store",
-        select: "name slug owner status",
-        match: { status: { $ne: "deleted" } },
-      },
-      {
-        path: "category",
-        select: "name status",
+        path: "product",
+        select: "name basePrice mainImageUrl highlighted maxPerPerson status store",
+        populate: {
+          path: "store",
+          select: "name slug owner status",
+          match: { status: "active" },
+        },
       },
     ],
   });
