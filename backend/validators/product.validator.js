@@ -5,7 +5,11 @@ const productVariantSchema = z.object({
   attributes: z.record(z.string()).optional().default({}),
   price: z.number().positive("Preço deve ser maior que zero"),
   stock: z.number().int().min(0, "Estoque deve ser maior ou igual a zero"),
-  sku: z.string().trim().min(1, "SKU é obrigatório").transform((value) => value.toUpperCase()),
+  sku: z
+    .string()
+    .trim()
+    .min(1, "SKU é obrigatório")
+    .transform((value) => value.toUpperCase()),
   imageUrl: z.url("A imagem deve ser uma URL válida").trim(),
   datasheet: z.string().trim().optional().nullable(),
   weight: z.number().min(0, "Peso deve ser maior ou igual a zero").optional().nullable(),

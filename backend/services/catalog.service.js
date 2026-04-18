@@ -11,7 +11,18 @@ import {
 const PRODUCT_RESPONSE_POPULATE = "store name slug owner status";
 const MAX_SLUG_RETRIES = 5;
 const PRODUCT_FIELDS = ["name", "description", "category", "highlighted", "maxPerPerson", "status"];
-const VARIANT_FIELDS = ["attributes", "price", "stock", "sku", "imageUrl", "datasheet", "weight", "length", "width", "height"];
+const VARIANT_FIELDS = [
+  "attributes",
+  "price",
+  "stock",
+  "sku",
+  "imageUrl",
+  "datasheet",
+  "weight",
+  "length",
+  "width",
+  "height",
+];
 
 const populateProductById = (productId) =>
   Product.findById(productId)
@@ -100,7 +111,11 @@ const syncProductVariants = async (productId, mainVariantPayload, extraVariantsP
 
   for (const variantPayload of extraVariantsPayload) {
     if (variantPayload._id) {
-      const existingVariant = await ProductVariant.findOne({ _id: variantPayload._id, product: productId, isMainVariant: false });
+      const existingVariant = await ProductVariant.findOne({
+        _id: variantPayload._id,
+        product: productId,
+        isMainVariant: false,
+      });
 
       if (!existingVariant) {
         throw createHttpError("Variação do produto não encontrada", 404, undefined, "PRODUCT_VARIANT_NOT_FOUND");
