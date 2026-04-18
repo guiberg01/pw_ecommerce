@@ -132,11 +132,13 @@ export const hydrateCartItems = async (items = []) => {
   const products = await Product.find({
     _id: { $in: productIds },
     status: { $ne: "deleted" },
-  }).populate({
-    path: "store",
-    select: "name slug owner status",
-    match: { status: { $ne: "deleted" } },
-  });
+  })
+    .populate({
+      path: "store",
+      select: "name slug owner status",
+      match: { status: { $ne: "deleted" } },
+    })
+    .populate("category", "name status");
 
   const productMap = new Map(products.map((product) => [product._id.toString(), product]));
   const hydratedItems = [];
@@ -245,11 +247,17 @@ export const getMongoCart = async (userId) => {
   return Cart.findOne({ user: userId }).populate({
     path: "items.product",
     select: "name price imageUrl category highlighted stock maxPerPerson status store",
-    populate: {
-      path: "store",
-      select: "name slug owner status",
-      match: { status: { $ne: "deleted" } },
-    },
+    populate: [
+      {
+        path: "store",
+        select: "name slug owner status",
+        match: { status: { $ne: "deleted" } },
+      },
+      {
+        path: "category",
+        select: "name status",
+      },
+    ],
   });
 };
 

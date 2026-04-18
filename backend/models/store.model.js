@@ -1,4 +1,5 @@
 import mongoose from "mongoose";
+import { slugify } from "../helpers/slugUnique.helper.js";
 
 const storeSchema = new mongoose.Schema(
   {
@@ -29,14 +30,35 @@ const storeSchema = new mongoose.Schema(
       ref: "User",
       required: true,
     },
+    categories: {
+      type: [
+        {
+          type: mongoose.Schema.Types.ObjectId,
+          ref: "Category",
+        },
+      ],
+      default: [],
+    },
     status: {
       type: String,
       enum: ["active", "blocked", "deleted"],
       default: "active",
     },
+    reputation: {
+      type: Number,
+      default: 0,
+      min: 0,
+      max: 5,
+    },
   },
   { timestamps: true },
 );
+
+storeSchema.pre("validate", function () {
+  if (!this.slug && this.name) {
+    this.slug = slugify(this.name);
+  }
+});
 
 storeSchema.index(
   { owner: 1 },

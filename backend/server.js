@@ -1,25 +1,22 @@
-// importando os módulos necessários
 import express from "express";
 import dotenv from "dotenv";
 import cookieParser from "cookie-parser";
 import { createHttpError } from "./helpers/httpError.js";
 import { errorHandler } from "./middleware/errorHandler.middleware.js";
 
-// Configuração opcional de DNS via variável de ambiente
 import dns from "dns";
 
-// Routes
 import authRoutes from "./routes/auth.route.js";
 import adminRoutes from "./routes/admin.route.js";
 import productRoutes from "./routes/product.route.js";
 import storeRoutes from "./routes/store.route.js";
 import cartRoutes from "./routes/cart.route.js";
+import couponRoutes from "./routes/coupon.route.js";
 
-// Database
 import { connectDB, disconnectDB } from "./config/db.js";
 import { disconnectRedis } from "./config/redis.js";
+import { startCouponExpirationScheduler } from "./jobs/couponExpiration.job.js";
 
-//Inicializa variaveis .env
 dotenv.config();
 
 if (process.env.DNS_SERVERS) {
@@ -47,43 +44,33 @@ const validateRequiredEnv = () => {
   }
 };
 
-// Criação do servidor Express
 const app = express();
 const PORT = process.env.PORT || 3980;
 let httpServer;
 let shuttingDown = false;
+let stopCouponExpirationScheduler;
 
-// Middleware pra funcionar req JSON
 app.use(express.json());
 app.use(cookieParser());
 
-// Definindo rota auth
 app.use("/api/auth", authRoutes);
-
-// Definindo rota admin
 app.use("/api/admin", adminRoutes);
-
-// Definindo rota products
 app.use("/api/products", productRoutes);
-
-// Definindo rota stores
 app.use("/api/stores", storeRoutes);
-
-// Definindo a rota do carrinho
 app.use("/api/cart", cartRoutes);
+app.use("/api/coupons", couponRoutes);
 
-// Middleware para rotas não encontradas
 app.use((req, res, next) => {
   next(createHttpError("Rota não encontrada", 404, undefined, "ROUTE_NOT_FOUND"));
 });
 
-// Middleware de tratamento de erros
 app.use(errorHandler);
 
 const bootstrap = async () => {
   try {
     validateRequiredEnv();
     await connectDB();
+    stopCouponExpirationScheduler = startCouponExpirationScheduler();
 
     httpServer = app.listen(PORT, () => {
       console.log(`Server rodando em: http://localhost:${PORT}`);
@@ -101,6 +88,10 @@ const gracefulShutdown = async (signal) => {
   console.log(`Recebido ${signal}. Encerrando aplicação...`);
 
   try {
+    if (stopCouponExpirationScheduler) {
+      stopCouponExpirationScheduler();
+    }
+
     if (httpServer) {
       await new Promise((resolve, reject) => {
         httpServer.close((error) => {

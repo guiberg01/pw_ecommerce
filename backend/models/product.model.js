@@ -19,10 +19,14 @@ const productSchema = new mongoose.Schema(
       type: String,
       required: [true, "A URL da imagem do produto é obrigatória"],
     },
-    category: {
-      type: String,
-      required: [true, "A categoria do produto é obrigatória"],
-    },
+    category: [
+      {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: "Category",
+        required: [true, "A categoria do produto é obrigatória"],
+        index: true,
+      },
+    ],
     store: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "Store",
@@ -58,11 +62,17 @@ const productSchema = new mongoose.Schema(
       enum: ["available", "blocked", "deleted", "unavailable", "cancelled"],
       default: "available",
     },
+    rating: {
+      type: Number,
+      default: 0,
+      min: 0,
+      max: 5,
+    },
   },
   { timestamps: true },
 );
 
-productSchema.index({ status: 1, store: 1 });
+productSchema.index({ status: 1, store: 1, category: 1 });
 
 const Product = mongoose.model("Product", productSchema);
 

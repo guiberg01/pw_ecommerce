@@ -19,9 +19,7 @@ router.post("/", isLoggedIn, isSeller, validateBody(createStoreSchema), createSt
 router.get("/me", isLoggedIn, isSeller, getMyStore);
 router.put("/me", isLoggedIn, isSeller, validateBody(updateMyStoreSchema), updateMyStore);
 router.post("/me/products", isLoggedIn, isSeller, validateBody(createProductSchema), createProductForMyStore);
-
 router.get("/:storeId", validateParams(storeIdParamSchema), getStoreById);
-
 router.delete("/:storeId", isLoggedIn, isSeller, validateParams(storeIdParamSchema), deleteMyStore);
 
 export default router;
