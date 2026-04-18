@@ -115,6 +115,14 @@ productSchema.virtual("productVariants", {
   foreignField: "product",
 });
 
+productSchema.virtual("mainVariant", {
+  ref: "ProductVariant",
+  localField: "_id",
+  foreignField: "product",
+  justOne: true,
+  match: { isMainVariant: true },
+});
+
 productSchema.virtual("rating.average").get(function () {
   const sum = Number(this.rating?.ratingSum ?? 0);
   const count = Number(this.rating?.ratingCount ?? 0);

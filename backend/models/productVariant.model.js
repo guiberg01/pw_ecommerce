@@ -8,6 +8,10 @@ const productVariantSchema = new mongoose.Schema(
       required: true,
       index: true,
     },
+    isMainVariant: {
+      type: Boolean,
+      default: false,
+    },
     attributes: {
       type: Map,
       of: String,
@@ -66,6 +70,13 @@ const productVariantSchema = new mongoose.Schema(
 
 productVariantSchema.index({ sku: 1 }, { unique: true });
 productVariantSchema.index({ product: 1, stock: 1 });
+productVariantSchema.index(
+  { product: 1, isMainVariant: 1 },
+  {
+    unique: true,
+    partialFilterExpression: { isMainVariant: true },
+  },
+);
 
 const ProductVariant = mongoose.model("ProductVariant", productVariantSchema);
 
