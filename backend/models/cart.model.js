@@ -2,10 +2,15 @@ import mongoose from "mongoose";
 
 const cartItemSchema = new mongoose.Schema(
   {
+    productVariant: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "ProductVariant",
+      default: null,
+    },
     product: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "Product",
-      required: true,
+      default: null,
     },
     quantity: {
       type: Number,
@@ -23,6 +28,26 @@ const cartSchema = new mongoose.Schema(
       ref: "User",
       required: true,
       unique: true,
+    },
+    appliedCoupon: {
+      couponId: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: "Coupon",
+        default: null,
+      },
+      code: {
+        type: String,
+        default: null,
+      },
+      discountType: {
+        type: String,
+        enum: ["percentage", "fixed"],
+        default: null,
+      },
+      discountValue: {
+        type: Number,
+        default: null,
+      },
     },
     items: {
       type: [cartItemSchema],
