@@ -10,14 +10,23 @@ const productSchema = new mongoose.Schema(
       type: String,
       required: [true, "A descrição do produto é obrigatória"],
     },
-    price: {
+    basePrice: {
       type: Number,
       required: [true, "O preço do produto é obrigatório"],
       min: [0, "O preço do produto deve ser um valor positivo"],
     },
-    imageUrl: {
+    mainImageUrl: {
       type: String,
       required: [true, "A URL da imagem do produto é obrigatória"],
+    },
+    price: {
+      type: Number,
+      min: [0, "O preço do produto deve ser um valor positivo"],
+      default: null,
+    },
+    imageUrl: {
+      type: String,
+      default: null,
     },
     category: [
       {
@@ -39,7 +48,7 @@ const productSchema = new mongoose.Schema(
     },
     stock: {
       type: Number,
-      required: [true, "A quantidade em estoque do produto é obrigatória"],
+      default: 0,
       min: [0, "A quantidade em estoque do produto não pode ser negativa"],
     },
     maxPerPerson: {
@@ -59,18 +68,64 @@ const productSchema = new mongoose.Schema(
     },
     status: {
       type: String,
-      enum: ["available", "blocked", "deleted", "unavailable", "cancelled"],
-      default: "available",
+      enum: ["active", "blocked", "deleted", "available", "unavailable", "cancelled"],
+      default: "active",
     },
     rating: {
-      type: Number,
-      default: 0,
-      min: 0,
-      max: 5,
+      ratingSum: {
+        type: Number,
+        default: 0,
+        min: 0,
+      },
+      ratingCount: {
+        type: Number,
+        default: 0,
+        min: 0,
+      },
     },
   },
-  { timestamps: true },
+  {
+    timestamps: true,
+    toJSON: { virtuals: true },
+    toObject: { virtuals: true },
+  },
 );
+
+productSchema.pre("validate", function () {
+  if ((this.basePrice == null || Number.isNaN(this.basePrice)) && this.price != null) {
+    this.basePrice = this.price;
+  }
+
+  if (!this.mainImageUrl && this.imageUrl) {
+    this.mainImageUrl = this.imageUrl;
+  }
+
+  if (this.price == null && this.basePrice != null) {
+    this.price = this.basePrice;
+  }
+
+  if (!this.imageUrl && this.mainImageUrl) {
+    this.imageUrl = this.mainImageUrl;
+  }
+
+  if (this.status === "active") {
+    this.status = "available";
+  }
+});
+
+productSchema.virtual("productVariants", {
+  ref: "ProductVariant",
+  localField: "_id",
+  foreignField: "product",
+});
+
+productSchema.virtual("rating.average").get(function () {
+  const sum = Number(this.rating?.ratingSum ?? 0);
+  const count = Number(this.rating?.ratingCount ?? 0);
+
+  if (!count) return 0;
+  return Math.round((sum / count) * 100) / 100;
+});
 
 productSchema.index({ status: 1, store: 1, category: 1 });
 
