@@ -5,12 +5,7 @@ const cartItemSchema = new mongoose.Schema(
     productVariant: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "ProductVariant",
-      default: null,
-    },
-    product: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: "Product",
-      default: null,
+      required: true,
     },
     quantity: {
       type: Number,
@@ -60,7 +55,7 @@ const cartSchema = new mongoose.Schema(
             type: Date,
             required: true,
           },
-          productId: {
+          productVariantId: {
             type: String,
             required: true,
           },

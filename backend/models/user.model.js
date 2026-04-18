@@ -27,6 +27,7 @@ const userSchema = new mongoose.Schema(
     cpf: {
       type: String,
       default: null,
+      sparse: true,
       trim: true,
     },
     stripeCustomerId: {
@@ -41,9 +42,13 @@ const userSchema = new mongoose.Schema(
     },
     status: {
       type: String,
-      enum: ["active", "suspended", "deleted", "blocked", "pending"],
+      enum: ["active", "suspended", "blocked", "pending"],
       default: "active",
       index: true,
+    },
+    suspendedSince: {
+      type: Date,
+      default: null,
     },
   },
   {
@@ -63,13 +68,8 @@ userSchema.methods.comparePassword = async function (password) {
   return await bcrypt.compare(password, this.password);
 };
 
-userSchema.index(
-  { email: 1 },
-  {
-    unique: true,
-    partialFilterExpression: { status: { $ne: "deleted" } },
-  },
-);
+userSchema.index({ email: 1 }, { unique: true });
+userSchema.index({ cpf: 1 }, { unique: true });
 
 userSchema.virtual("review", {
   ref: "Review",

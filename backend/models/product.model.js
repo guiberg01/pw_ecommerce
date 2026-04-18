@@ -68,7 +68,7 @@ const productSchema = new mongoose.Schema(
     },
     status: {
       type: String,
-      enum: ["active", "blocked", "deleted", "available", "unavailable", "cancelled"],
+      enum: ["active", "blocked", "deleted"],
       default: "active",
     },
     rating: {
@@ -106,10 +106,6 @@ productSchema.pre("validate", function () {
 
   if (!this.imageUrl && this.mainImageUrl) {
     this.imageUrl = this.mainImageUrl;
-  }
-
-  if (this.status === "active") {
-    this.status = "available";
   }
 });
 

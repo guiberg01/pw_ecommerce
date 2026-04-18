@@ -17,7 +17,7 @@ const couponUsageSchema = new mongoose.Schema(
     order: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "Order",
-      required: true,
+      default: null,
       index: true,
     },
     usedAt: {
@@ -29,7 +29,13 @@ const couponUsageSchema = new mongoose.Schema(
   { timestamps: true },
 );
 
-couponUsageSchema.index({ coupon: 1, user: 1, order: 1 }, { unique: true });
+couponUsageSchema.index(
+  { coupon: 1, user: 1, order: 1 },
+  {
+    unique: true,
+    partialFilterExpression: { order: { $exists: true, $ne: null } },
+  },
+);
 
 const CouponUsage = mongoose.model("CouponUsage", couponUsageSchema);
 

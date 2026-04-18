@@ -23,6 +23,7 @@ const storeSchema = new mongoose.Schema(
     cnpj: {
       type: String,
       default: null,
+      sparse: true,
       trim: true,
     },
     logoUrl: {
@@ -92,6 +93,8 @@ storeSchema.index(
     partialFilterExpression: { status: { $ne: "deleted" } },
   },
 );
+
+storeSchema.index({ cnpj: 1 }, { unique: true });
 
 storeSchema.virtual("product", {
   ref: "Product",
