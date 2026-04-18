@@ -41,18 +41,24 @@ const normalizeAttributes = (attributes) => {
 };
 
 const normalizeVariantInput = (variantInput = {}) => {
-  return {
-    attributes: normalizeAttributes(variantInput.attributes),
-    price: variantInput.price,
-    stock: variantInput.stock,
-    sku: typeof variantInput.sku === "string" ? variantInput.sku.trim().toUpperCase() : variantInput.sku,
-    imageUrl: variantInput.imageUrl,
-    datasheet: variantInput.datasheet ?? null,
-    weight: variantInput.weight ?? null,
-    length: variantInput.length ?? null,
-    width: variantInput.width ?? null,
-    height: variantInput.height ?? null,
-  };
+  const normalizedVariant = {};
+
+  if (variantInput.attributes !== undefined)
+    normalizedVariant.attributes = normalizeAttributes(variantInput.attributes);
+  if (variantInput.price !== undefined) normalizedVariant.price = variantInput.price;
+  if (variantInput.stock !== undefined) normalizedVariant.stock = variantInput.stock;
+  if (variantInput.sku !== undefined) {
+    normalizedVariant.sku =
+      typeof variantInput.sku === "string" ? variantInput.sku.trim().toUpperCase() : variantInput.sku;
+  }
+  if (variantInput.imageUrl !== undefined) normalizedVariant.imageUrl = variantInput.imageUrl;
+  if (variantInput.datasheet !== undefined) normalizedVariant.datasheet = variantInput.datasheet;
+  if (variantInput.weight !== undefined) normalizedVariant.weight = variantInput.weight;
+  if (variantInput.length !== undefined) normalizedVariant.length = variantInput.length;
+  if (variantInput.width !== undefined) normalizedVariant.width = variantInput.width;
+  if (variantInput.height !== undefined) normalizedVariant.height = variantInput.height;
+
+  return normalizedVariant;
 };
 
 const extractProductPayload = (payload = {}) => {

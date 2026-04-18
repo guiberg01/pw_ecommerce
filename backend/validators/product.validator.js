@@ -2,7 +2,7 @@ import { z } from "zod";
 import { mongoIdSchema } from "./common.validator.js";
 
 const productVariantSchema = z.object({
-  attributes: z.record(z.string()).optional().default({}),
+  attributes: z.record(z.string(), z.string()).optional().default({}),
   price: z.number().positive("Preço deve ser maior que zero"),
   stock: z.number().int().min(0, "Estoque deve ser maior ou igual a zero"),
   sku: z
