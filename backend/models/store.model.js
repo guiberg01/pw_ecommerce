@@ -23,7 +23,6 @@ const storeSchema = new mongoose.Schema(
     cnpj: {
       type: String,
       default: null,
-      sparse: true,
       trim: true,
     },
     logoUrl: {
@@ -94,7 +93,7 @@ storeSchema.index(
   },
 );
 
-storeSchema.index({ cnpj: 1 }, { unique: true });
+storeSchema.index({ cnpj: 1 }, { unique: true, sparse: true });
 
 storeSchema.virtual("product", {
   ref: "Product",
