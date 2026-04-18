@@ -19,15 +19,6 @@ const productSchema = new mongoose.Schema(
       type: String,
       required: [true, "A URL da imagem do produto é obrigatória"],
     },
-    price: {
-      type: Number,
-      min: [0, "O preço do produto deve ser um valor positivo"],
-      default: null,
-    },
-    imageUrl: {
-      type: String,
-      default: null,
-    },
     category: [
       {
         type: mongoose.Schema.Types.ObjectId,
@@ -45,11 +36,6 @@ const productSchema = new mongoose.Schema(
     highlighted: {
       type: Boolean,
       default: false,
-    },
-    stock: {
-      type: Number,
-      default: 0,
-      min: [0, "A quantidade em estoque do produto não pode ser negativa"],
     },
     maxPerPerson: {
       type: Number,
@@ -80,24 +66,6 @@ const productSchema = new mongoose.Schema(
     toObject: { virtuals: true },
   },
 );
-
-productSchema.pre("validate", function () {
-  if ((this.basePrice == null || Number.isNaN(this.basePrice)) && this.price != null) {
-    this.basePrice = this.price;
-  }
-
-  if (!this.mainImageUrl && this.imageUrl) {
-    this.mainImageUrl = this.imageUrl;
-  }
-
-  if (this.price == null && this.basePrice != null) {
-    this.price = this.basePrice;
-  }
-
-  if (!this.imageUrl && this.mainImageUrl) {
-    this.imageUrl = this.mainImageUrl;
-  }
-});
 
 productSchema.virtual("productVariants", {
   ref: "ProductVariant",

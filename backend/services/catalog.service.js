@@ -43,6 +43,7 @@ const normalizeAttributes = (attributes) => {
 const normalizeVariantInput = (variantInput = {}) => {
   const normalizedVariant = {};
 
+  if (variantInput.variantId !== undefined) normalizedVariant.variantId = variantInput.variantId;
   if (variantInput.attributes !== undefined)
     normalizedVariant.attributes = normalizeAttributes(variantInput.attributes);
   if (variantInput.price !== undefined) normalizedVariant.price = variantInput.price;
@@ -74,16 +75,11 @@ const extractProductPayload = (payload = {}) => {
 };
 
 const extractMainVariantPayload = (payload = {}) => {
-  if (payload.mainVariant) {
-    return normalizeVariantInput(payload.mainVariant);
-  }
-
-  const hasLegacyVariantField = VARIANT_FIELDS.some((field) => payload[field] !== undefined);
-  if (!hasLegacyVariantField) {
+  if (!payload.mainVariant) {
     return null;
   }
 
-  return normalizeVariantInput(payload);
+  return normalizeVariantInput(payload.mainVariant);
 };
 
 const extractExtraVariantsPayload = (payload = {}) => {
@@ -94,12 +90,20 @@ const extractExtraVariantsPayload = (payload = {}) => {
   return payload.variants.map((variantInput) => normalizeVariantInput(variantInput));
 };
 
+const extractRemoveVariantIds = (payload = {}) => {
+  if (!Array.isArray(payload.removeVariantIds)) {
+    return [];
+  }
+
+  return [...new Set(payload.removeVariantIds.filter(Boolean).map((variantId) => variantId.toString()))];
+};
+
 const cleanupCreatedProduct = async (productId) => {
   await ProductVariant.deleteMany({ product: productId });
   await Product.findByIdAndDelete(productId);
 };
 
-const syncProductVariants = async (productId, mainVariantPayload, extraVariantsPayload = []) => {
+const syncProductVariants = async (productId, mainVariantPayload, extraVariantsPayload = [], removeVariantIds = []) => {
   if (mainVariantPayload) {
     const mainVariant = await ProductVariant.findOne({ product: productId, isMainVariant: true });
 
@@ -115,10 +119,18 @@ const syncProductVariants = async (productId, mainVariantPayload, extraVariantsP
     }
   }
 
+  if (removeVariantIds.length > 0) {
+    await ProductVariant.deleteMany({
+      _id: { $in: removeVariantIds },
+      product: productId,
+      isMainVariant: false,
+    });
+  }
+
   for (const variantPayload of extraVariantsPayload) {
-    if (variantPayload._id) {
+    if (variantPayload.variantId) {
       const existingVariant = await ProductVariant.findOne({
-        _id: variantPayload._id,
+        _id: variantPayload.variantId,
         product: productId,
         isMainVariant: false,
       });
@@ -127,13 +139,16 @@ const syncProductVariants = async (productId, mainVariantPayload, extraVariantsP
         throw createHttpError("Variação do produto não encontrada", 404, undefined, "PRODUCT_VARIANT_NOT_FOUND");
       }
 
-      Object.assign(existingVariant, variantPayload, { product: productId, isMainVariant: false });
+      const { variantId, ...variantData } = variantPayload;
+      Object.assign(existingVariant, variantData, { product: productId, isMainVariant: false });
       await existingVariant.save();
       continue;
     }
 
+    const { variantId, ...variantData } = variantPayload;
+
     await ProductVariant.create({
-      ...variantPayload,
+      ...variantData,
       product: productId,
       isMainVariant: false,
     });
@@ -173,6 +188,31 @@ export const getProduct = async (productId) => {
   }
 
   return product;
+};
+
+export const findProductVariantByIdOrThrow = async (variantId) => {
+  const variant = await ProductVariant.findOne({ _id: variantId }).populate({
+    path: "product",
+    select: "name description basePrice mainImageUrl highlighted maxPerPerson status store category",
+    match: { status: { $ne: "deleted" } },
+    populate: [
+      {
+        path: "store",
+        select: "name slug owner status",
+        match: { status: { $ne: "deleted" } },
+      },
+      {
+        path: "category",
+        select: "name status",
+      },
+    ],
+  });
+
+  if (!variant || !variant.product || !variant.product.store) {
+    throw createHttpError("Variação não encontrada", 404, undefined, "PRODUCT_VARIANT_NOT_FOUND");
+  }
+
+  return variant;
 };
 
 export const createStores = async (id, data) => {
@@ -310,6 +350,7 @@ export const createProductForStore = async (storeId, payload) => {
   const productPayload = extractProductPayload(payload);
   const mainVariantPayload = extractMainVariantPayload(payload);
   const extraVariantsPayload = extractExtraVariantsPayload(payload);
+  const removeVariantIds = extractRemoveVariantIds(payload);
 
   if (!mainVariantPayload) {
     throw createHttpError("A variação principal é obrigatória", 400, undefined, "PRODUCT_MAIN_VARIANT_REQUIRED");
@@ -325,7 +366,7 @@ export const createProductForStore = async (storeId, payload) => {
   await product.save();
 
   try {
-    await syncProductVariants(product._id, mainVariantPayload, extraVariantsPayload);
+    await syncProductVariants(product._id, mainVariantPayload, extraVariantsPayload, removeVariantIds);
     return populateProductById(product._id);
   } catch (error) {
     await cleanupCreatedProduct(product._id);
@@ -353,6 +394,7 @@ export const updateProductAndPopulate = async (product, payload) => {
   const productPayload = extractProductPayload(payload);
   const mainVariantPayload = extractMainVariantPayload(payload);
   const extraVariantsPayload = extractExtraVariantsPayload(payload);
+  const removeVariantIds = extractRemoveVariantIds(payload);
 
   if (mainVariantPayload?.price !== undefined) {
     productPayload.basePrice = mainVariantPayload.price;
@@ -367,8 +409,8 @@ export const updateProductAndPopulate = async (product, payload) => {
     await product.save();
   }
 
-  if (mainVariantPayload || extraVariantsPayload.length > 0) {
-    await syncProductVariants(product._id, mainVariantPayload, extraVariantsPayload);
+  if (mainVariantPayload || extraVariantsPayload.length > 0 || removeVariantIds.length > 0) {
+    await syncProductVariants(product._id, mainVariantPayload, extraVariantsPayload, removeVariantIds);
   }
 
   return populateProductById(product._id);
