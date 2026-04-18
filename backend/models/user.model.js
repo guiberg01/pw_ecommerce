@@ -1,17 +1,16 @@
 import mongoose from "mongoose";
 import bcrypt from "bcryptjs";
 
-// definindo o schema do usuário, com os campos necessários e suas validações bem completinho
 const userSchema = new mongoose.Schema(
   {
     name: {
       type: String,
       required: [true, "O nome é obrigatório"],
+      trim: true,
     },
     email: {
       type: String,
       required: [true, "O email é obrigatório"],
-      unique: true,
       lowercase: true,
       trim: true,
     },
@@ -25,25 +24,77 @@ const userSchema = new mongoose.Schema(
       enum: ["customer", "seller", "admin"],
       default: "customer",
     },
+    cpf: {
+      type: String,
+      default: null,
+      trim: true,
+    },
+    stripeCustomerId: {
+      type: String,
+      default: null,
+      trim: true,
+    },
+    telephone: {
+      type: String,
+      default: null,
+      trim: true,
+    },
+    status: {
+      type: String,
+      enum: ["active", "suspended", "deleted", "blocked", "pending"],
+      default: "active",
+      index: true,
+    },
   },
   {
     timestamps: true,
+    toJSON: { virtuals: true },
+    toObject: { virtuals: true },
   },
 );
 
-// Antes de salvar o usuário no banco, ele roda o código de baixo e faz o hash na senha se ela tiver sido modificada
 userSchema.pre("save", async function () {
   if (!this.isModified("password")) return;
 
   this.password = await bcrypt.hash(this.password, 10);
 });
 
-// Compara a senha fornecida com a do banco
 userSchema.methods.comparePassword = async function (password) {
   return await bcrypt.compare(password, this.password);
 };
 
-// criando o modelo do usuário a partir do schema
+userSchema.index(
+  { email: 1 },
+  {
+    unique: true,
+    partialFilterExpression: { status: { $ne: "deleted" } },
+  },
+);
+
+userSchema.virtual("review", {
+  ref: "Review",
+  localField: "_id",
+  foreignField: "user",
+});
+
+userSchema.virtual("paymentMethod", {
+  ref: "PaymentMethod",
+  localField: "_id",
+  foreignField: "user",
+});
+
+userSchema.virtual("address", {
+  ref: "Address",
+  localField: "_id",
+  foreignField: "user",
+});
+
+userSchema.virtual("order", {
+  ref: "Order",
+  localField: "_id",
+  foreignField: "user",
+});
+
 const User = mongoose.model("User", userSchema);
 
 export default User;
