@@ -30,7 +30,7 @@ export const createCouponSchema = z
     products: z.array(mongoIdSchema).optional(),
     stores: z.array(mongoIdSchema).optional(),
     categories: z.array(mongoIdSchema).optional(),
-    status: z.enum(["active", "inactive"]).optional(),
+    status: z.enum(["active", "inactive", "expired", "sold-out", "deleted"]).optional(),
   })
   .superRefine((data, ctx) => {
     if (data.discountType === "percentage" && data.discountValue > 100) {

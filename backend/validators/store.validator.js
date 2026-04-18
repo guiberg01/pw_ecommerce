@@ -18,7 +18,7 @@ export const updateMyStoreSchema = z
   });
 
 export const updateStoreStatusByAdminSchema = z.object({
-  status: z.enum(["active", "blocked"]),
+  status: z.enum(["active", "suspended", "blocked", "deleted", "pending"]),
 });
 
 export const storeIdParamSchema = z.object({

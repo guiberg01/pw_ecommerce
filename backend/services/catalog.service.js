@@ -18,22 +18,21 @@ export const getVisibleProducts = async () => {
   }
 
   return Product.find({
-    status: "available",
+    status: "active",
     store: { $in: activeStoreIds },
   })
     .populate({
       path: "store",
       select: "name slug owner status",
-      match: { status: { $ne: "deleted" } },
+      match: { status: "active" },
     })
     .populate("category", "name status");
 };
 
 export const getProduct = async (productId) => {
-  const product = await Product.findOne({ _id: productId, status: { $in: ["available", "unavailable"] } })
+  const product = await Product.findOne({ _id: productId, status: "active" })
     .populate("store", "name reputation")
-    .populate("category", "name status")
-    .lean();
+    .populate("category", "name status");
 
   if (!product) {
     throw createHttpError("Produto não encontrado", 404, undefined, "PRODUCT_NOT_FOUND");
@@ -138,7 +137,7 @@ export const findActiveStoreOrThrow = async (storeId) => {
 };
 
 export const findActiveStoreByOwner = async (ownerId) => {
-  return Store.findOne({ owner: ownerId, status: { $ne: "deleted" } });
+  return Store.findOne({ owner: ownerId, status: "active" });
 };
 
 export const findActiveStoreByOwnerOrThrow = async (ownerId) => {
