@@ -20,6 +20,11 @@ const storeSchema = new mongoose.Schema(
       default: "",
       trim: true,
     },
+    cnpj: {
+      type: String,
+      default: null,
+      trim: true,
+    },
     logoUrl: {
       type: String,
       default: "",
@@ -41,7 +46,7 @@ const storeSchema = new mongoose.Schema(
     },
     status: {
       type: String,
-      enum: ["active", "blocked", "deleted"],
+      enum: ["active", "suspended", "blocked", "deleted", "pending"],
       default: "active",
     },
     reputation: {
@@ -50,8 +55,28 @@ const storeSchema = new mongoose.Schema(
       min: 0,
       max: 5,
     },
+    stripeConnectId: {
+      type: String,
+      default: null,
+      trim: true,
+    },
+    commissionRate: {
+      type: Number,
+      default: null,
+      min: 0,
+      max: 100,
+    },
+    address: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Address",
+      default: null,
+    },
   },
-  { timestamps: true },
+  {
+    timestamps: true,
+    toJSON: { virtuals: true },
+    toObject: { virtuals: true },
+  },
 );
 
 storeSchema.pre("validate", function () {
@@ -67,6 +92,12 @@ storeSchema.index(
     partialFilterExpression: { status: { $ne: "deleted" } },
   },
 );
+
+storeSchema.virtual("product", {
+  ref: "Product",
+  localField: "_id",
+  foreignField: "store",
+});
 
 const Store = mongoose.model("Store", storeSchema);
 
