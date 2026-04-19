@@ -12,6 +12,7 @@ import productRoutes from "./routes/product.route.js";
 import productVariantRoutes from "./routes/productVariant.route.js";
 import categoryRoutes from "./routes/category.route.js";
 import storeRoutes from "./routes/store.route.js";
+import addressRoutes from "./routes/address.route.js";
 import cartRoutes from "./routes/cart.route.js";
 import couponRoutes from "./routes/coupon.route.js";
 
@@ -61,6 +62,7 @@ app.use("/api/products", productRoutes);
 app.use("/api/product-variants", productVariantRoutes);
 app.use("/api/categories", categoryRoutes);
 app.use("/api/stores", storeRoutes);
+app.use("/api/addresses", addressRoutes);
 app.use("/api/cart", cartRoutes);
 app.use("/api/coupons", couponRoutes);
 
