@@ -72,6 +72,15 @@ export const createCategory = async ({ name }) => {
 export const updateCategoryById = async (categoryId, payload) => {
   const category = await findCategoryByIdOrThrow(categoryId, { includeInactive: true });
 
+  if (payload.status === "deleted") {
+    throw createHttpError(
+      "Use o endpoint de exclusão para deletar categoria",
+      400,
+      undefined,
+      "CATEGORY_DELETE_VIA_UPDATE_FORBIDDEN",
+    );
+  }
+
   if (payload.status !== undefined) {
     category.status = payload.status;
   }
