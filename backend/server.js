@@ -55,7 +55,15 @@ let httpServer;
 let shuttingDown = false;
 let stopCouponExpirationScheduler;
 
-app.use(express.json());
+app.use(
+  express.json({
+    verify: (req, res, buf) => {
+      if (req.originalUrl === "/api/checkout/webhook/stripe") {
+        req.rawBody = Buffer.from(buf);
+      }
+    },
+  }),
+);
 app.use(cookieParser());
 
 app.use("/api/auth", authRoutes);

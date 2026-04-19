@@ -1,4 +1,5 @@
 import mongoose from "mongoose";
+import Stripe from "stripe";
 import Cart from "../models/cart.model.js";
 import Order from "../models/order.model.js";
 import SubOrder from "../models/subOrder.model.js";
@@ -7,9 +8,92 @@ import Address from "../models/address.model.js";
 import PaymentMethod from "../models/paymentMethod.model.js";
 import Payment from "../models/payment.model.js";
 import Coupon from "../models/coupon.model.js";
+import CouponUsage from "../models/couponUsage.model.js";
 import { createHttpError } from "../helpers/httpError.js";
 
 const roundMoney = (value) => Math.round((Number(value) + Number.EPSILON) * 100) / 100;
+const CHECKOUT_EVENT_SOURCE = "stripe_webhook";
+
+const stripeClient = process.env.STRIPE_SECRET_KEY ? new Stripe(process.env.STRIPE_SECRET_KEY) : null;
+
+const getStripeClientOrThrow = () => {
+  if (!stripeClient) {
+    throw createHttpError("Stripe não configurado", 500, undefined, "STRIPE_NOT_CONFIGURED");
+  }
+
+  return stripeClient;
+};
+
+const buildStripeWebhookEventOrThrow = (payloadBuffer, signature) => {
+  const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET;
+  if (!webhookSecret) {
+    throw createHttpError("Webhook do Stripe não configurado", 500, undefined, "STRIPE_WEBHOOK_NOT_CONFIGURED");
+  }
+
+  if (!signature) {
+    throw createHttpError("Assinatura Stripe ausente", 400, undefined, "STRIPE_WEBHOOK_SIGNATURE_MISSING");
+  }
+
+  try {
+    return getStripeClientOrThrow().webhooks.constructEvent(payloadBuffer, signature, webhookSecret);
+  } catch {
+    throw createHttpError("Assinatura Stripe inválida", 400, undefined, "STRIPE_WEBHOOK_SIGNATURE_INVALID");
+  }
+};
+
+const isEventAlreadyProcessed = (payment, stripeEventId) => {
+  return (payment.events ?? []).some(
+    (event) => event?.source === CHECKOUT_EVENT_SOURCE && event?.stripeEventId === stripeEventId,
+  );
+};
+
+const appendPaymentEvent = ({ payment, stripeEventId, type, metadata = {} }) => {
+  payment.events = [
+    ...(payment.events ?? []),
+    {
+      source: CHECKOUT_EVENT_SOURCE,
+      stripeEventId,
+      type,
+      at: new Date(),
+      metadata,
+    },
+  ];
+};
+
+const consumeCouponIfNeeded = async ({ session, couponSnapshot, orderId, userId }) => {
+  if (!couponSnapshot?.couponId) return;
+
+  const existingUsage = await CouponUsage.findOne({
+    coupon: couponSnapshot.couponId,
+    user: userId,
+    order: orderId,
+  }).session(session);
+
+  if (existingUsage) return;
+
+  await CouponUsage.create(
+    [
+      {
+        coupon: couponSnapshot.couponId,
+        user: userId,
+        order: orderId,
+        usedAt: new Date(),
+      },
+    ],
+    { session },
+  );
+
+  const couponDoc = await Coupon.findById(couponSnapshot.couponId).session(session);
+  if (!couponDoc) return;
+
+  couponDoc.usedCount = Number(couponDoc.usedCount ?? 0) + 1;
+
+  if (couponDoc.maxUses != null && couponDoc.usedCount >= Number(couponDoc.maxUses)) {
+    couponDoc.status = "sold-out";
+  }
+
+  await couponDoc.save({ session });
+};
 
 const buildShippingSnapshot = (address) => ({
   label: address.label,
@@ -25,7 +109,7 @@ const buildShippingSnapshot = (address) => ({
   location: address.location,
 });
 
-const validateCouponByContextOrThrow = async ({ couponCode, subTotal, items }) => {
+const validateCouponByContextOrThrow = async ({ couponCode, subTotal, items, userId }) => {
   if (!couponCode) {
     return {
       coupon: null,
@@ -42,6 +126,19 @@ const validateCouponByContextOrThrow = async ({ couponCode, subTotal, items }) =
 
   if (coupon.expiresAt && coupon.expiresAt <= new Date()) {
     throw createHttpError("Cupom expirado", 400, undefined, "CHECKOUT_COUPON_EXPIRED");
+  }
+
+  if (coupon.maxUses != null && Number(coupon.usedCount ?? 0) >= Number(coupon.maxUses)) {
+    throw createHttpError("Cupom indisponível", 400, undefined, "CHECKOUT_COUPON_SOLD_OUT");
+  }
+
+  const userUsageCount = await CouponUsage.countDocuments({
+    coupon: coupon._id,
+    user: userId,
+    order: { $ne: null },
+  });
+  if (coupon.maxUsesPerUser != null && userUsageCount >= Number(coupon.maxUsesPerUser)) {
+    throw createHttpError("Limite de uso do cupom atingido", 400, undefined, "CHECKOUT_COUPON_MAX_USES_PER_USER");
   }
 
   if (subTotal < Number(coupon.minOrderValue ?? 0)) {
@@ -264,6 +361,7 @@ export const createCheckoutIntentForUser = async (userId, payload) => {
     couponCode,
     subTotal,
     items: cartContext.normalizedItems,
+    userId,
   });
 
   const totalDiscount = couponContext.discountAmount;
@@ -352,34 +450,266 @@ export const createCheckoutIntentForUser = async (userId, payload) => {
         { session },
       );
     });
+
+    const stripeIntent = await getStripeClientOrThrow().paymentIntents.create({
+      amount: Math.round(totalPaidByCustomer * 100),
+      currency: "brl",
+      automatic_payment_methods: { enabled: true },
+      metadata: {
+        orderId: order._id.toString(),
+        paymentId: payment._id.toString(),
+        userId: userId.toString(),
+      },
+    });
+
+    payment.stripePaymentIntentId = stripeIntent.id;
+    await payment.save();
+
+    order.stripePaymentId = stripeIntent.id;
+    await order.save();
+
+    return {
+      orderId: order._id,
+      paymentId: payment._id,
+      paymentIntent: {
+        provider: "stripe",
+        status: stripeIntent.status,
+        clientSecret: stripeIntent.client_secret,
+        amountInCents: stripeIntent.amount,
+        currency: String(stripeIntent.currency ?? "brl").toUpperCase(),
+      },
+      summary: {
+        totalPriceProducts: subTotal,
+        totalDiscount,
+        totalShippingPrice,
+        totalPaidByCustomer,
+        subOrders: subOrders.map((subOrder) => ({
+          id: subOrder._id,
+          store: subOrder.store,
+          subTotal: subOrder.subTotal,
+          discountAmount: subOrder.discountAmount,
+          shippingCost: subOrder.shippingCost,
+          vendorNetAmount: subOrder.vendorNetAmount,
+          status: subOrder.status,
+        })),
+      },
+    };
   } finally {
     await session.endSession();
   }
+};
+
+const markPaymentAsFailedByIntentId = async ({ stripePaymentIntentId, stripeEventId, eventType, metadata = {} }) => {
+  const session = await mongoose.startSession();
+
+  try {
+    await session.withTransaction(async () => {
+      const payment = await Payment.findOne({ stripePaymentIntentId }).session(session);
+      if (!payment) return;
+
+      if (isEventAlreadyProcessed(payment, stripeEventId)) return;
+
+      if (payment.status !== "succeeded") {
+        payment.status = eventType === "payment_intent.requires_action" ? "requires_action" : "failed";
+      }
+
+      appendPaymentEvent({ payment, stripeEventId, type: eventType, metadata });
+      await payment.save({ session });
+
+      if (payment.status === "failed") {
+        await Order.updateOne(
+          { _id: payment.order, status: { $ne: "paid" } },
+          { $set: { status: "failed" } },
+          { session },
+        );
+        await SubOrder.updateMany(
+          { order: payment.order, status: { $in: ["pending", "processing"] } },
+          { $set: { status: "failed" } },
+          { session },
+        );
+      }
+    });
+  } finally {
+    await session.endSession();
+  }
+};
+
+const markPaymentAsSucceededByIntentId = async ({ stripePaymentIntent, stripeEventId }) => {
+  const stripePaymentIntentId = stripePaymentIntent.id;
+  const session = await mongoose.startSession();
+
+  try {
+    await session.withTransaction(async () => {
+      const payment = await Payment.findOne({ stripePaymentIntentId }).session(session);
+      if (!payment) return;
+
+      if (isEventAlreadyProcessed(payment, stripeEventId)) return;
+
+      if (payment.status === "succeeded") {
+        appendPaymentEvent({
+          payment,
+          stripeEventId,
+          type: "payment_intent.succeeded",
+          metadata: { duplicate: true },
+        });
+        await payment.save({ session });
+        return;
+      }
+
+      const order = await Order.findById(payment.order).session(session);
+      if (!order) return;
+
+      const subOrders = await SubOrder.find({ order: order._id }).session(session);
+
+      const variantRequirements = [];
+      for (const subOrder of subOrders) {
+        for (const item of subOrder.items ?? []) {
+          variantRequirements.push({
+            productVariantId: item.productVariantId.toString(),
+            quantity: Number(item.quantity),
+          });
+        }
+      }
+
+      if (variantRequirements.length > 0) {
+        const variantIds = variantRequirements.map((item) => item.productVariantId);
+        const variants = await ProductVariant.find({ _id: { $in: variantIds } })
+          .session(session)
+          .select("stock")
+          .lean();
+        const stockByVariant = new Map(variants.map((variant) => [variant._id.toString(), Number(variant.stock)]));
+
+        const hasInsufficientStock = variantRequirements.some(
+          (requiredItem) => requiredItem.quantity > (stockByVariant.get(requiredItem.productVariantId) ?? 0),
+        );
+
+        if (hasInsufficientStock) {
+          payment.status = "failed";
+          appendPaymentEvent({
+            payment,
+            stripeEventId,
+            type: "payment_intent.succeeded",
+            metadata: { stockConflict: true },
+          });
+          await payment.save({ session });
+
+          order.status = "failed";
+          await order.save({ session });
+          await SubOrder.updateMany(
+            { order: order._id, status: { $in: ["pending", "processing"] } },
+            { $set: { status: "failed" } },
+            { session },
+          );
+          return;
+        }
+      }
+
+      for (const subOrder of subOrders) {
+        for (const item of subOrder.items ?? []) {
+          const updated = await ProductVariant.updateOne(
+            { _id: item.productVariantId, stock: { $gte: Number(item.quantity) } },
+            { $inc: { stock: -Number(item.quantity) } },
+            { session },
+          );
+
+          if (!updated.modifiedCount) {
+            throw createHttpError(
+              "Estoque insuficiente ao confirmar pagamento",
+              409,
+              {
+                productVariantId: item.productVariantId,
+                quantity: item.quantity,
+              },
+              "CHECKOUT_WEBHOOK_STOCK_CONFLICT",
+            );
+          }
+        }
+      }
+
+      const couponSnapshot = subOrders.find((subOrder) => subOrder.coupon?.couponId)?.coupon;
+      await consumeCouponIfNeeded({
+        session,
+        couponSnapshot,
+        orderId: order._id,
+        userId: order.user,
+      });
+
+      await Cart.updateOne(
+        { user: order.user },
+        {
+          $set: {
+            items: [],
+            appliedCoupon: {
+              couponId: null,
+              code: null,
+              discountType: null,
+              discountValue: null,
+            },
+          },
+        },
+        { session },
+      );
+
+      order.status = "paid";
+      await order.save({ session });
+
+      await SubOrder.updateMany({ order: order._id, status: "pending" }, { $set: { status: "paid" } }, { session });
+
+      payment.status = "succeeded";
+      payment.paidAt = new Date();
+      payment.stripeChargeId =
+        typeof stripePaymentIntent.latest_charge === "string"
+          ? stripePaymentIntent.latest_charge
+          : payment.stripeChargeId;
+
+      appendPaymentEvent({
+        payment,
+        stripeEventId,
+        type: "payment_intent.succeeded",
+        metadata: {
+          amountReceived: stripePaymentIntent.amount_received,
+          currency: stripePaymentIntent.currency,
+        },
+      });
+
+      await payment.save({ session });
+    });
+  } finally {
+    await session.endSession();
+  }
+};
+
+export const processStripeWebhookEvent = async ({ payloadBuffer, signature }) => {
+  const event = buildStripeWebhookEventOrThrow(payloadBuffer, signature);
+
+  switch (event.type) {
+    case "payment_intent.succeeded": {
+      await markPaymentAsSucceededByIntentId({
+        stripePaymentIntent: event.data.object,
+        stripeEventId: event.id,
+      });
+      break;
+    }
+    case "payment_intent.payment_failed":
+    case "payment_intent.canceled":
+    case "payment_intent.requires_action": {
+      await markPaymentAsFailedByIntentId({
+        stripePaymentIntentId: event.data.object.id,
+        stripeEventId: event.id,
+        eventType: event.type,
+        metadata: {
+          lastPaymentErrorCode: event.data.object.last_payment_error?.code ?? null,
+        },
+      });
+      break;
+    }
+    default:
+      break;
+  }
 
   return {
-    orderId: order._id,
-    paymentId: payment._id,
-    paymentIntent: {
-      provider: "stripe",
-      status: "pending_creation",
-      clientSecret: null,
-      amountInCents: Math.round(totalPaidByCustomer * 100),
-      currency: "BRL",
-    },
-    summary: {
-      totalPriceProducts: subTotal,
-      totalDiscount,
-      totalShippingPrice,
-      totalPaidByCustomer,
-      subOrders: subOrders.map((subOrder) => ({
-        id: subOrder._id,
-        store: subOrder.store,
-        subTotal: subOrder.subTotal,
-        discountAmount: subOrder.discountAmount,
-        shippingCost: subOrder.shippingCost,
-        vendorNetAmount: subOrder.vendorNetAmount,
-        status: subOrder.status,
-      })),
-    },
+    received: true,
+    eventId: event.id,
+    eventType: event.type,
   };
 };
