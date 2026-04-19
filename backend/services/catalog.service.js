@@ -1,6 +1,7 @@
 import Product from "../models/product.model.js";
 import ProductVariant from "../models/productVariant.model.js";
 import Store from "../models/store.model.js";
+import Category from "../models/category.model.js";
 import { createHttpError } from "../helpers/httpError.js";
 import {
   createDocumentWithUniqueSlug,
@@ -96,6 +97,16 @@ const extractRemoveVariantIds = (payload = {}) => {
   }
 
   return [...new Set(payload.removeVariantIds.filter(Boolean).map((variantId) => variantId.toString()))];
+};
+
+const ensureCategoryIsActiveOrThrow = async (categoryId) => {
+  if (!categoryId) return;
+
+  const category = await Category.findOne({ _id: categoryId, status: "active" }).select("_id");
+
+  if (!category) {
+    throw createHttpError("Categoria inválida ou inativa", 400, undefined, "CATEGORY_INVALID_OR_INACTIVE");
+  }
 };
 
 const cleanupCreatedProduct = async (productId) => {
@@ -368,6 +379,8 @@ export const createProductForStore = async (storeId, payload) => {
   const extraVariantsPayload = extractExtraVariantsPayload(payload);
   const removeVariantIds = extractRemoveVariantIds(payload);
 
+  await ensureCategoryIsActiveOrThrow(productPayload.category?.[0]);
+
   if (!mainVariantPayload) {
     throw createHttpError("A variação principal é obrigatória", 400, undefined, "PRODUCT_MAIN_VARIANT_REQUIRED");
   }
@@ -411,6 +424,8 @@ export const updateProductAndPopulate = async (product, payload) => {
   const mainVariantPayload = extractMainVariantPayload(payload);
   const extraVariantsPayload = extractExtraVariantsPayload(payload);
   const removeVariantIds = extractRemoveVariantIds(payload);
+
+  await ensureCategoryIsActiveOrThrow(productPayload.category?.[0]);
 
   if (mainVariantPayload?.price !== undefined) {
     productPayload.basePrice = mainVariantPayload.price;
