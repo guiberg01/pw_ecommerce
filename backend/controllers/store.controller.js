@@ -10,6 +10,10 @@ import {
   softDeleteStore,
   updateStoreForOwner,
 } from "../services/catalog.service.js";
+import {
+  createStripeOnboardingLinkForStoreOwner,
+  getStripeConnectStatusForStoreOwner,
+} from "../services/stripeConnect.service.js";
 
 export const allStores = async (req, res, next) => {
   try {
@@ -71,6 +75,24 @@ export const deleteMyStore = async (req, res, next) => {
     await softDeleteStore(store._id);
 
     return sendSuccess(res, 200, "Loja deletada com sucesso");
+  } catch (error) {
+    return next(error);
+  }
+};
+
+export const createMyStoreStripeOnboardingLink = async (req, res, next) => {
+  try {
+    const onboarding = await createStripeOnboardingLinkForStoreOwner(req.user._id, req.body);
+    return sendSuccess(res, 200, "Link de onboarding Stripe gerado com sucesso", onboarding);
+  } catch (error) {
+    return next(error);
+  }
+};
+
+export const getMyStoreStripeConnectStatus = async (req, res, next) => {
+  try {
+    const status = await getStripeConnectStatusForStoreOwner(req.user._id);
+    return sendSuccess(res, 200, "Status da conta Stripe obtido com sucesso", status);
   } catch (error) {
     return next(error);
   }

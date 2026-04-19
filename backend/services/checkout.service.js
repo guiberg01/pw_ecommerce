@@ -9,10 +9,13 @@ import PaymentMethod from "../models/paymentMethod.model.js";
 import Payment from "../models/payment.model.js";
 import Coupon from "../models/coupon.model.js";
 import CouponUsage from "../models/couponUsage.model.js";
+import Payout from "../models/payout.model.js";
+import Store from "../models/store.model.js";
 import { createHttpError } from "../helpers/httpError.js";
 
 const roundMoney = (value) => Math.round((Number(value) + Number.EPSILON) * 100) / 100;
 const CHECKOUT_EVENT_SOURCE = "stripe_webhook";
+const DEFAULT_COMMISSION_RATE = 10;
 
 const stripeClient = process.env.STRIPE_SECRET_KEY ? new Stripe(process.env.STRIPE_SECRET_KEY) : null;
 
@@ -93,6 +96,14 @@ const consumeCouponIfNeeded = async ({ session, couponSnapshot, orderId, userId 
   }
 
   await couponDoc.save({ session });
+};
+
+const getCommissionRate = (value) => {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) return DEFAULT_COMMISSION_RATE;
+  if (parsed < 0) return 0;
+  if (parsed > 100) return 100;
+  return parsed;
 };
 
 const buildShippingSnapshot = (address) => ({
@@ -187,7 +198,14 @@ const validateCouponByContextOrThrow = async ({ couponCode, subTotal, items, use
   };
 };
 
-const buildSubOrders = ({ orderId, groupedByStore, totalDiscount, coupon, eligibleItemKeys }) => {
+const buildSubOrders = ({
+  orderId,
+  groupedByStore,
+  totalDiscount,
+  coupon,
+  eligibleItemKeys,
+  commissionRateByStore,
+}) => {
   const stores = Array.from(groupedByStore.values());
   const subTotalAllStores = roundMoney(stores.reduce((sum, store) => sum + store.subTotal, 0));
   let allocatedDiscount = 0;
@@ -212,7 +230,8 @@ const buildSubOrders = ({ orderId, groupedByStore, totalDiscount, coupon, eligib
     allocatedDiscount = roundMoney(allocatedDiscount + storeDiscount);
 
     const shippingCost = 0;
-    const platformFee = 0;
+    const commissionRate = getCommissionRate(commissionRateByStore.get(storeGroup.storeId.toString()));
+    const platformFee = roundMoney(((storeGroup.subTotal - storeDiscount + shippingCost) * commissionRate) / 100);
     const vendorNetAmount = roundMoney(storeGroup.subTotal - storeDiscount + shippingCost - platformFee);
 
     return {
@@ -236,6 +255,28 @@ const buildSubOrders = ({ orderId, groupedByStore, totalDiscount, coupon, eligib
       status: "pending",
     };
   });
+};
+
+const buildStoreConnectContext = async (groupedByStore) => {
+  const storeIds = Array.from(groupedByStore.values()).map((entry) => entry.storeId);
+  const stores = await Store.find({ _id: { $in: storeIds }, status: "active" }).select(
+    "stripeConnectId commissionRate",
+  );
+
+  if (stores.length !== storeIds.length) {
+    throw createHttpError("Uma ou mais lojas do carrinho estão inválidas", 400, undefined, "CHECKOUT_STORE_INVALID");
+  }
+
+  const map = new Map();
+  for (const store of stores) {
+    map.set(store._id.toString(), {
+      storeId: store._id,
+      stripeConnectId: store.stripeConnectId,
+      commissionRate: getCommissionRate(store.commissionRate),
+    });
+  }
+
+  return map;
 };
 
 const normalizeCartForCheckoutOrThrow = async (userId) => {
@@ -367,6 +408,7 @@ export const createCheckoutIntentForUser = async (userId, payload) => {
   const totalDiscount = couponContext.discountAmount;
   const totalShippingPrice = 0;
   const totalPaidByCustomer = roundMoney(subTotal - totalDiscount + totalShippingPrice);
+  const connectContextByStore = await buildStoreConnectContext(cartContext.groupedByStore);
 
   const session = await mongoose.startSession();
 
@@ -417,9 +459,16 @@ export const createCheckoutIntentForUser = async (userId, payload) => {
         totalDiscount,
         coupon: couponContext.coupon,
         eligibleItemKeys: couponContext.eligibleItemKeys,
+        commissionRateByStore: new Map(
+          Array.from(connectContextByStore.entries()).map(([storeId, context]) => [storeId, context.commissionRate]),
+        ),
       });
 
       subOrders = await SubOrder.insertMany(subOrderPayload, { session });
+
+      const platformRevenue = roundMoney(
+        subOrderPayload.reduce((sum, subOrder) => sum + Number(subOrder.platformFee ?? 0), 0),
+      );
 
       [payment] = await Payment.create(
         [
@@ -434,6 +483,7 @@ export const createCheckoutIntentForUser = async (userId, payload) => {
               last4: paymentMethod.last4,
               installments: 1,
             },
+            platformRevenue,
             status: "pending",
             events: [
               {
@@ -442,6 +492,7 @@ export const createCheckoutIntentForUser = async (userId, payload) => {
                 metadata: {
                   paymentMethodId: paymentMethod._id.toString(),
                   couponCode: couponContext.coupon?.code ?? null,
+                  storeCount: connectContextByStore.size,
                 },
               },
             ],
@@ -455,10 +506,12 @@ export const createCheckoutIntentForUser = async (userId, payload) => {
       amount: Math.round(totalPaidByCustomer * 100),
       currency: "brl",
       automatic_payment_methods: { enabled: true },
+      transfer_group: `order_${order._id}`,
       metadata: {
         orderId: order._id.toString(),
         paymentId: payment._id.toString(),
         userId: userId.toString(),
+        storeCount: String(connectContextByStore.size),
       },
     });
 
@@ -534,9 +587,114 @@ const markPaymentAsFailedByIntentId = async ({ stripePaymentIntentId, stripeEven
   }
 };
 
+const tryDispatchPayoutTransfer = async ({ payout, payment, stripe }) => {
+  if (payout.stripePayoutId) {
+    return;
+  }
+
+  const store = await Store.findById(payout.store).select("stripeConnectId status").lean();
+
+  if (!store || store.status !== "active") {
+    payout.status = "failed";
+    payout.failureMessage = "Loja inválida para transferência";
+    await payout.save();
+    return;
+  }
+
+  if (!store.stripeConnectId) {
+    payout.status = "pending";
+    payout.failureMessage = "Onboarding Stripe pendente para a loja";
+    await payout.save();
+    return;
+  }
+
+  const account = await stripe.accounts.retrieve(store.stripeConnectId);
+  if (!account.charges_enabled || !account.payouts_enabled) {
+    payout.status = "pending";
+    payout.failureMessage = "Conta Stripe da loja ainda não habilitada para recebimento";
+    await payout.save();
+    return;
+  }
+
+  const amountInCents = Math.round(Number(payout.amount ?? 0) * 100);
+  if (amountInCents <= 0) {
+    payout.status = "cancelled";
+    payout.failureMessage = "Valor de transferência inválido";
+    await payout.save();
+    return;
+  }
+
+  const transfer = await stripe.transfers.create({
+    amount: amountInCents,
+    currency: "brl",
+    destination: store.stripeConnectId,
+    transfer_group: `order_${payment.order.toString()}`,
+    source_transaction: payment.stripeChargeId ?? undefined,
+    metadata: {
+      payoutId: payout._id.toString(),
+      orderId: payment.order.toString(),
+      paymentId: payment._id.toString(),
+      storeId: payout.store.toString(),
+    },
+  });
+
+  payout.stripePayoutId = transfer.id;
+  payout.status = "paid";
+  payout.payday = new Date();
+  payout.failureMessage = null;
+  await payout.save();
+};
+
+const dispatchPendingPayoutTransfersForOrder = async ({ orderId, paymentId }) => {
+  const stripe = getStripeClientOrThrow();
+  const [payment, payouts] = await Promise.all([
+    Payment.findById(paymentId).select("_id order stripeChargeId"),
+    Payout.find({ status: "pending" })
+      .where("subOrders")
+      .in(await SubOrder.find({ order: orderId }).distinct("_id")),
+  ]);
+
+  if (!payment || payouts.length === 0) return;
+
+  for (const payout of payouts) {
+    try {
+      await tryDispatchPayoutTransfer({ payout, payment, stripe });
+    } catch (error) {
+      payout.status = "failed";
+      payout.failureMessage = error?.message ?? "Falha ao transferir fundos para a loja";
+      await payout.save();
+    }
+  }
+};
+
+export const dispatchPendingPayoutTransfersForStore = async (storeId) => {
+  const stripe = getStripeClientOrThrow();
+  const payouts = await Payout.find({ store: storeId, status: "pending" }).sort({ createdAt: 1 });
+
+  for (const payout of payouts) {
+    const subOrder = await SubOrder.findOne({ _id: { $in: payout.subOrders } })
+      .select("order")
+      .lean();
+    if (!subOrder) continue;
+
+    const payment = await Payment.findOne({ order: subOrder.order }).select("_id order stripeChargeId");
+    if (!payment || !payment.stripeChargeId) continue;
+
+    try {
+      await tryDispatchPayoutTransfer({ payout, payment, stripe });
+    } catch (error) {
+      payout.status = "failed";
+      payout.failureMessage = error?.message ?? "Falha ao transferir fundos para a loja";
+      await payout.save();
+    }
+  }
+};
+
 const markPaymentAsSucceededByIntentId = async ({ stripePaymentIntent, stripeEventId }) => {
   const stripePaymentIntentId = stripePaymentIntent.id;
   const session = await mongoose.startSession();
+  let orderIdForPayout = null;
+  let paymentIdForPayout = null;
 
   try {
     await session.withTransaction(async () => {
@@ -655,6 +813,39 @@ const markPaymentAsSucceededByIntentId = async ({ stripePaymentIntent, stripeEve
 
       await SubOrder.updateMany({ order: order._id, status: "pending" }, { $set: { status: "paid" } }, { session });
 
+      const payoutByStore = new Map();
+      for (const subOrder of subOrders) {
+        const key = subOrder.store.toString();
+        const amount = Number(subOrder.vendorNetAmount ?? 0);
+
+        if (!payoutByStore.has(key)) {
+          payoutByStore.set(key, {
+            store: subOrder.store,
+            subOrders: [],
+            amount: 0,
+          });
+        }
+
+        const target = payoutByStore.get(key);
+        target.subOrders.push(subOrder._id);
+        target.amount = roundMoney(target.amount + amount);
+      }
+
+      if (payoutByStore.size > 0) {
+        await Payout.insertMany(
+          Array.from(payoutByStore.values()).map((entry) => ({
+            store: entry.store,
+            subOrders: entry.subOrders,
+            amount: entry.amount,
+            status: "pending",
+          })),
+          { session },
+        );
+      }
+
+      orderIdForPayout = order._id;
+      paymentIdForPayout = payment._id;
+
       payment.status = "succeeded";
       payment.paidAt = new Date();
       payment.stripeChargeId =
@@ -674,9 +865,54 @@ const markPaymentAsSucceededByIntentId = async ({ stripePaymentIntent, stripeEve
 
       await payment.save({ session });
     });
+
+    if (orderIdForPayout && paymentIdForPayout) {
+      await dispatchPendingPayoutTransfersForOrder({
+        orderId: orderIdForPayout,
+        paymentId: paymentIdForPayout,
+      });
+    }
   } finally {
     await session.endSession();
   }
+};
+
+const syncPayoutStatusFromStripeEvent = async ({ connectedAccountId, payoutObject, eventType }) => {
+  if (!connectedAccountId || !payoutObject?.id) return;
+
+  const store = await Store.findOne({ stripeConnectId: connectedAccountId }).select("_id").lean();
+  if (!store) return;
+
+  let payout = await Payout.findOne({ stripePayoutId: payoutObject.id });
+
+  if (!payout) {
+    payout = await Payout.findOne({ store: store._id, status: { $in: ["pending", "in_transit"] } }).sort({
+      createdAt: 1,
+    });
+    if (!payout) return;
+
+    payout.stripePayoutId = payoutObject.id;
+  }
+
+  if (eventType === "payout.paid") {
+    payout.status = "paid";
+    payout.payday = payoutObject.arrival_date ? new Date(payoutObject.arrival_date * 1000) : new Date();
+  }
+
+  if (eventType === "payout.failed") {
+    payout.status = "failed";
+    payout.failureMessage = payoutObject.failure_message ?? "Payout falhou no Stripe";
+  }
+
+  if (eventType === "payout.canceled") {
+    payout.status = "cancelled";
+  }
+
+  if (eventType === "payout.created") {
+    payout.status = "in_transit";
+  }
+
+  await payout.save();
 };
 
 export const processStripeWebhookEvent = async ({ payloadBuffer, signature }) => {
@@ -700,6 +936,17 @@ export const processStripeWebhookEvent = async ({ payloadBuffer, signature }) =>
         metadata: {
           lastPaymentErrorCode: event.data.object.last_payment_error?.code ?? null,
         },
+      });
+      break;
+    }
+    case "payout.created":
+    case "payout.paid":
+    case "payout.failed":
+    case "payout.canceled": {
+      await syncPayoutStatusFromStripeEvent({
+        connectedAccountId: event.account,
+        payoutObject: event.data.object,
+        eventType: event.type,
       });
       break;
     }
