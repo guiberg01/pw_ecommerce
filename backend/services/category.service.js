@@ -10,6 +10,35 @@ export const listActiveCategories = async () => {
   return Category.find({ status: "active" }).sort({ name: 1 });
 };
 
+export const listCategoriesForAdmin = async ({ status, search, page = 1, limit = 20 } = {}) => {
+  const filters = {};
+
+  if (status) {
+    filters.status = status;
+  }
+
+  if (search) {
+    filters.name = { $regex: search, $options: "i" };
+  }
+
+  const skip = (page - 1) * limit;
+
+  const [items, total] = await Promise.all([
+    Category.find(filters).sort({ createdAt: -1 }).skip(skip).limit(limit),
+    Category.countDocuments(filters),
+  ]);
+
+  return {
+    items,
+    pagination: {
+      page,
+      limit,
+      total,
+      totalPages: Math.ceil(total / limit) || 1,
+    },
+  };
+};
+
 export const findCategoryByIdOrThrow = async (categoryId, { includeInactive = false } = {}) => {
   const statusFilter = includeInactive ? { $ne: "deleted" } : "active";
   const category = await Category.findOne({ _id: categoryId, status: statusFilter });

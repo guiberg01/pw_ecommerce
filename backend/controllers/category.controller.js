@@ -3,9 +3,20 @@ import {
   createCategory,
   findCategoryByIdOrThrow,
   listActiveCategories,
+  listCategoriesForAdmin,
   softDeleteCategoryById,
   updateCategoryById,
 } from "../services/category.service.js";
+
+export const getAllCategoriesForAdmin = async (req, res, next) => {
+  try {
+    const { status, search, page, limit } = req.validatedQuery ?? {};
+    const categories = await listCategoriesForAdmin({ status, search, page, limit });
+    return sendSuccess(res, 200, "Categorias listadas com sucesso", categories);
+  } catch (error) {
+    return next(error);
+  }
+};
 
 export const getAllCategories = async (req, res, next) => {
   try {
