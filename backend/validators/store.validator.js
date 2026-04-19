@@ -24,3 +24,7 @@ export const updateStoreStatusByAdminSchema = z.object({
 export const storeIdParamSchema = z.object({
   storeId: mongoIdSchema,
 });
+
+export const storeListQuerySchema = z.object({
+  categoryId: mongoIdSchema.optional(),
+});

@@ -340,6 +340,16 @@ export const findStoreByIdOrThrow = async (storeId) => {
   return store;
 };
 
+export const listVisibleStores = async ({ categoryId } = {}) => {
+  const filters = { status: "active" };
+
+  if (categoryId) {
+    filters.categories = categoryId;
+  }
+
+  return Store.find(filters).sort({ createdAt: -1 });
+};
+
 export const ensureStoreHasNoActiveProducts = async (storeId) => {
   const hasProduct = await Product.exists({ store: storeId, status: { $ne: "deleted" } });
 
