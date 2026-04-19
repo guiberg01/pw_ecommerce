@@ -1,4 +1,6 @@
 import Category from "../models/category.model.js";
+import Product from "../models/product.model.js";
+import Store from "../models/store.model.js";
 import { createHttpError } from "../helpers/httpError.js";
 import { createDocumentWithUniqueSlug, saveDocumentWithUniqueSlug } from "../helpers/slugUnique.helper.js";
 
@@ -107,6 +109,23 @@ export const softDeleteCategoryById = async (categoryId) => {
 
   if (category.status === "deleted") {
     throw createHttpError("Categoria já está deletada", 400, undefined, "CATEGORY_ALREADY_DELETED");
+  }
+
+  const [activeProductsCount, activeStoresCount] = await Promise.all([
+    Product.countDocuments({ category: category._id, status: { $ne: "deleted" } }),
+    Store.countDocuments({ categories: category._id, status: { $ne: "deleted" } }),
+  ]);
+
+  if (activeProductsCount > 0 || activeStoresCount > 0) {
+    throw createHttpError(
+      "Não é possível excluir categoria com vínculos ativos",
+      409,
+      {
+        activeProductsCount,
+        activeStoresCount,
+      },
+      "CATEGORY_HAS_ACTIVE_REFERENCES",
+    );
   }
 
   category.status = "deleted";

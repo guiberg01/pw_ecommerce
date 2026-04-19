@@ -155,17 +155,23 @@ const syncProductVariants = async (productId, mainVariantPayload, extraVariantsP
   }
 };
 
-export const getVisibleProducts = async () => {
+export const getVisibleProducts = async ({ categoryId } = {}) => {
   const activeStoreIds = await Store.find({ status: "active" }).distinct("_id");
 
   if (activeStoreIds.length === 0) {
     return [];
   }
 
-  return Product.find({
+  const filters = {
     status: "active",
     store: { $in: activeStoreIds },
-  })
+  };
+
+  if (categoryId) {
+    filters.category = categoryId;
+  }
+
+  return Product.find(filters)
     .populate({
       path: "store",
       select: "name slug owner status",
