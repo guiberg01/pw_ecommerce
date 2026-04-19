@@ -156,3 +156,7 @@ export const productIdParamSchema = z.object({
 export const productVariantIdParamSchema = z.object({
   id: mongoIdSchema,
 });
+
+export const productListQuerySchema = z.object({
+  categoryId: mongoIdSchema.optional(),
+});

@@ -15,7 +15,11 @@ const validate = (schema, target) => {
       return next(validationError);
     }
 
-    req[target] = result.data;
+    if (target === "query") {
+      req.validatedQuery = result.data;
+    } else {
+      req[target] = result.data;
+    }
 
     next();
   };
@@ -23,3 +27,4 @@ const validate = (schema, target) => {
 
 export const validateBody = (schema) => validate(schema, "body");
 export const validateParams = (schema) => validate(schema, "params");
+export const validateQuery = (schema) => validate(schema, "query");

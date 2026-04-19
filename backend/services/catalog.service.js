@@ -1,6 +1,7 @@
 import Product from "../models/product.model.js";
 import ProductVariant from "../models/productVariant.model.js";
 import Store from "../models/store.model.js";
+import Category from "../models/category.model.js";
 import { createHttpError } from "../helpers/httpError.js";
 import {
   createDocumentWithUniqueSlug,
@@ -98,6 +99,16 @@ const extractRemoveVariantIds = (payload = {}) => {
   return [...new Set(payload.removeVariantIds.filter(Boolean).map((variantId) => variantId.toString()))];
 };
 
+const ensureCategoryIsActiveOrThrow = async (categoryId) => {
+  if (!categoryId) return;
+
+  const category = await Category.findOne({ _id: categoryId, status: "active" }).select("_id");
+
+  if (!category) {
+    throw createHttpError("Categoria inválida ou inativa", 400, undefined, "CATEGORY_INVALID_OR_INACTIVE");
+  }
+};
+
 const cleanupCreatedProduct = async (productId) => {
   await ProductVariant.deleteMany({ product: productId });
   await Product.findByIdAndDelete(productId);
@@ -155,17 +166,23 @@ const syncProductVariants = async (productId, mainVariantPayload, extraVariantsP
   }
 };
 
-export const getVisibleProducts = async () => {
+export const getVisibleProducts = async ({ categoryId } = {}) => {
   const activeStoreIds = await Store.find({ status: "active" }).distinct("_id");
 
   if (activeStoreIds.length === 0) {
     return [];
   }
 
-  return Product.find({
+  const filters = {
     status: "active",
     store: { $in: activeStoreIds },
-  })
+  };
+
+  if (categoryId) {
+    filters.category = categoryId;
+  }
+
+  return Product.find(filters)
     .populate({
       path: "store",
       select: "name slug owner status",
@@ -334,6 +351,16 @@ export const findStoreByIdOrThrow = async (storeId) => {
   return store;
 };
 
+export const listVisibleStores = async ({ categoryId } = {}) => {
+  const filters = { status: "active" };
+
+  if (categoryId) {
+    filters.categories = categoryId;
+  }
+
+  return Store.find(filters).sort({ createdAt: -1 });
+};
+
 export const ensureStoreHasNoActiveProducts = async (storeId) => {
   const hasProduct = await Product.exists({ store: storeId, status: { $ne: "deleted" } });
 
@@ -351,6 +378,8 @@ export const createProductForStore = async (storeId, payload) => {
   const mainVariantPayload = extractMainVariantPayload(payload);
   const extraVariantsPayload = extractExtraVariantsPayload(payload);
   const removeVariantIds = extractRemoveVariantIds(payload);
+
+  await ensureCategoryIsActiveOrThrow(productPayload.category?.[0]);
 
   if (!mainVariantPayload) {
     throw createHttpError("A variação principal é obrigatória", 400, undefined, "PRODUCT_MAIN_VARIANT_REQUIRED");
@@ -395,6 +424,8 @@ export const updateProductAndPopulate = async (product, payload) => {
   const mainVariantPayload = extractMainVariantPayload(payload);
   const extraVariantsPayload = extractExtraVariantsPayload(payload);
   const removeVariantIds = extractRemoveVariantIds(payload);
+
+  await ensureCategoryIsActiveOrThrow(productPayload.category?.[0]);
 
   if (mainVariantPayload?.price !== undefined) {
     productPayload.basePrice = mainVariantPayload.price;

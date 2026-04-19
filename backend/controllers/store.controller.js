@@ -6,9 +6,20 @@ import {
   createStores,
   findActiveStoreByOwnerOrThrow,
   findStoreByIdOrThrow,
+  listVisibleStores,
   softDeleteStore,
   updateStoreForOwner,
 } from "../services/catalog.service.js";
+
+export const allStores = async (req, res, next) => {
+  try {
+    const { categoryId } = req.validatedQuery ?? {};
+    const stores = await listVisibleStores({ categoryId });
+    return sendSuccess(res, 200, "Lojas listadas com sucesso", stores);
+  } catch (error) {
+    return next(error);
+  }
+};
 
 export const createStore = async (req, res, next) => {
   try {
