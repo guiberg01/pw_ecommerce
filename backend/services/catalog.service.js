@@ -114,6 +114,15 @@ const cleanupCreatedProduct = async (productId) => {
   await Product.findByIdAndDelete(productId);
 };
 
+const syncStoreCategoriesFromProducts = async (storeId) => {
+  const categories = await Product.distinct("category", {
+    store: storeId,
+    status: { $ne: "deleted" },
+  });
+
+  await Store.findByIdAndUpdate(storeId, { $set: { categories } });
+};
+
 const syncProductVariants = async (productId, mainVariantPayload, extraVariantsPayload = [], removeVariantIds = []) => {
   if (mainVariantPayload) {
     const mainVariant = await ProductVariant.findOne({ product: productId, isMainVariant: true });
@@ -317,7 +326,7 @@ export const updateStoreForOwner = async (ownerId, data) => {
   return store;
 };
 
-export const findActiveStoreOrThrow = async (storeId) => {
+export const findExistingStoreOrThrow = async (storeId) => {
   const store = await Store.findOne({ _id: storeId, status: { $ne: "deleted" } });
 
   if (!store) {
@@ -396,6 +405,7 @@ export const createProductForStore = async (storeId, payload) => {
 
   try {
     await syncProductVariants(product._id, mainVariantPayload, extraVariantsPayload, removeVariantIds);
+    await syncStoreCategoriesFromProducts(storeId);
     return populateProductById(product._id);
   } catch (error) {
     await cleanupCreatedProduct(product._id);
@@ -404,6 +414,7 @@ export const createProductForStore = async (storeId, payload) => {
 };
 
 export const findActiveProductOrThrow = async (productId, { populateStoreOwner = false } = {}) => {
+  // Aqui "active" no nome significa "existente e não deletado" para permitir ações administrativas.
   const query = Product.findOne({ _id: productId, status: { $ne: "deleted" } });
 
   if (populateStoreOwner) {
@@ -444,9 +455,15 @@ export const updateProductAndPopulate = async (product, payload) => {
     await syncProductVariants(product._id, mainVariantPayload, extraVariantsPayload, removeVariantIds);
   }
 
+  await syncStoreCategoriesFromProducts(product.store);
+
   return populateProductById(product._id);
 };
 
 export const softDeleteProduct = async (productId) => {
-  await Product.findByIdAndUpdate(productId, { status: "deleted" });
+  const product = await Product.findByIdAndUpdate(productId, { status: "deleted" }, { new: true }).select("store");
+
+  if (product?.store) {
+    await syncStoreCategoriesFromProducts(product.store);
+  }
 };

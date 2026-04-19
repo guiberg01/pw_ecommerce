@@ -120,7 +120,7 @@ const buildShippingSnapshot = (address) => ({
   location: address.location,
 });
 
-const validateCouponByContextOrThrow = async ({ couponCode, subTotal, items, userId }) => {
+const validateCouponByContextOrThrow = async ({ couponCode, subTotal, items, userId, session }) => {
   if (!couponCode) {
     return {
       coupon: null,
@@ -129,7 +129,7 @@ const validateCouponByContextOrThrow = async ({ couponCode, subTotal, items, use
     };
   }
 
-  const coupon = await Coupon.findOne({ code: couponCode, status: { $in: ["active", "sold-out"] } });
+  const coupon = await Coupon.findOne({ code: couponCode, status: { $in: ["active", "sold-out"] } }).session(session);
 
   if (!coupon) {
     throw createHttpError("Cupom inválido ou indisponível", 400, undefined, "CHECKOUT_COUPON_INVALID");
@@ -147,7 +147,7 @@ const validateCouponByContextOrThrow = async ({ couponCode, subTotal, items, use
     coupon: coupon._id,
     user: userId,
     order: { $ne: null },
-  });
+  }).session(session);
   if (coupon.maxUsesPerUser != null && userUsageCount >= Number(coupon.maxUsesPerUser)) {
     throw createHttpError("Limite de uso do cupom atingido", 400, undefined, "CHECKOUT_COUPON_MAX_USES_PER_USER");
   }
@@ -257,11 +257,11 @@ const buildSubOrders = ({
   });
 };
 
-const buildStoreConnectContext = async (groupedByStore) => {
+const buildStoreConnectContext = async (groupedByStore, session) => {
   const storeIds = Array.from(groupedByStore.values()).map((entry) => entry.storeId);
-  const stores = await Store.find({ _id: { $in: storeIds }, status: "active" }).select(
-    "stripeConnectId commissionRate",
-  );
+  const stores = await Store.find({ _id: { $in: storeIds }, status: "active" })
+    .select("stripeConnectId commissionRate")
+    .session(session);
 
   if (stores.length !== storeIds.length) {
     throw createHttpError("Uma ou mais lojas do carrinho estão inválidas", 400, undefined, "CHECKOUT_STORE_INVALID");
@@ -279,19 +279,21 @@ const buildStoreConnectContext = async (groupedByStore) => {
   return map;
 };
 
-const normalizeCartForCheckoutOrThrow = async (userId) => {
-  const cart = await Cart.findOne({ user: userId }).populate({
-    path: "items.productVariant",
-    select: "price stock sku imageUrl product",
-    populate: {
-      path: "product",
-      select: "name maxPerPerson status category store",
+const normalizeCartForCheckoutOrThrow = async (userId, session) => {
+  const cart = await Cart.findOne({ user: userId })
+    .session(session)
+    .populate({
+      path: "items.productVariant",
+      select: "price stock sku imageUrl product",
       populate: {
-        path: "store",
-        select: "status",
+        path: "product",
+        select: "name maxPerPerson status category store",
+        populate: {
+          path: "store",
+          select: "status",
+        },
       },
-    },
-  });
+    });
 
   if (!cart || (cart.items ?? []).length === 0) {
     throw createHttpError("Carrinho vazio", 400, undefined, "CHECKOUT_CART_EMPTY");
@@ -380,44 +382,51 @@ const normalizeCartForCheckoutOrThrow = async (userId) => {
 export const createCheckoutIntentForUser = async (userId, payload) => {
   const { addressId, paymentMethodId, couponCode } = payload;
 
-  const [address, paymentMethod, cartContext] = await Promise.all([
-    Address.findOne({ _id: addressId, user: userId }),
-    PaymentMethod.findOne({ _id: paymentMethodId, user: userId }),
-    normalizeCartForCheckoutOrThrow(userId),
-  ]);
-
-  if (!address) {
-    throw createHttpError("Endereço não encontrado", 404, undefined, "CHECKOUT_ADDRESS_NOT_FOUND");
-  }
-
-  if (!paymentMethod) {
-    throw createHttpError("Método de pagamento não encontrado", 404, undefined, "CHECKOUT_PAYMENT_METHOD_NOT_FOUND");
-  }
-
-  const subTotal = roundMoney(
-    cartContext.normalizedItems.reduce((sum, item) => sum + item.unitPrice * item.quantity, 0),
-  );
-
-  const couponContext = await validateCouponByContextOrThrow({
-    couponCode,
-    subTotal,
-    items: cartContext.normalizedItems,
-    userId,
-  });
-
-  const totalDiscount = couponContext.discountAmount;
-  const totalShippingPrice = 0;
-  const totalPaidByCustomer = roundMoney(subTotal - totalDiscount + totalShippingPrice);
-  const connectContextByStore = await buildStoreConnectContext(cartContext.groupedByStore);
-
   const session = await mongoose.startSession();
 
   let order;
   let payment;
   let subOrders;
+  let subTotal;
+  let totalDiscount;
+  let totalPaidByCustomer;
 
   try {
     await session.withTransaction(async () => {
+      const [address, paymentMethod, cartContext] = await Promise.all([
+        Address.findOne({ _id: addressId, user: userId }).session(session),
+        PaymentMethod.findOne({ _id: paymentMethodId, user: userId }).session(session),
+        normalizeCartForCheckoutOrThrow(userId, session),
+      ]);
+
+      if (!address) {
+        throw createHttpError("Endereço não encontrado", 404, undefined, "CHECKOUT_ADDRESS_NOT_FOUND");
+      }
+
+      if (!paymentMethod) {
+        throw createHttpError(
+          "Método de pagamento não encontrado",
+          404,
+          undefined,
+          "CHECKOUT_PAYMENT_METHOD_NOT_FOUND",
+        );
+      }
+
+      subTotal = roundMoney(cartContext.normalizedItems.reduce((sum, item) => sum + item.unitPrice * item.quantity, 0));
+
+      const couponContext = await validateCouponByContextOrThrow({
+        couponCode,
+        subTotal,
+        items: cartContext.normalizedItems,
+        userId,
+        session,
+      });
+
+      totalDiscount = couponContext.discountAmount;
+      const totalShippingPrice = 0;
+      totalPaidByCustomer = roundMoney(subTotal - totalDiscount + totalShippingPrice);
+      const connectContextByStore = await buildStoreConnectContext(cartContext.groupedByStore, session);
+
       // Revalida estoque dentro da transação para reduzir risco de corrida.
       const variantIds = cartContext.normalizedItems.map((item) => item.productVariantId);
       const variants = await ProductVariant.find({ _id: { $in: variantIds } })
@@ -444,7 +453,7 @@ export const createCheckoutIntentForUser = async (userId, payload) => {
             user: userId,
             totalPriceProducts: subTotal,
             totalPaidByCustomer,
-            totalShippingPrice,
+            totalShippingPrice: 0,
             totalDiscount,
             status: "pending",
             shippingAddress: buildShippingSnapshot(address),
@@ -534,7 +543,7 @@ export const createCheckoutIntentForUser = async (userId, payload) => {
       summary: {
         totalPriceProducts: subTotal,
         totalDiscount,
-        totalShippingPrice,
+        totalShippingPrice: 0,
         totalPaidByCustomer,
         subOrders: subOrders.map((subOrder) => ({
           id: subOrder._id,

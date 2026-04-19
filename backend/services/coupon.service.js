@@ -37,13 +37,15 @@ export const findCouponById = async (id) => {
     .lean();
 
   if (!coupon) {
-    const markedExpired = await Coupon.findOneAndUpdate(
-      { _id: id, status: "active", expiresAt: { $ne: null, $lte: now } },
-      { $set: { status: "expired" } },
-      { new: false },
-    ).lean();
+    const expiredCoupon = await Coupon.findOne({
+      _id: id,
+      status: { $in: activeCouponStatuses },
+      expiresAt: { $ne: null, $lte: now },
+    })
+      .select("_id")
+      .lean();
 
-    if (markedExpired) {
+    if (expiredCoupon) {
       throw createHttpError("Cupom expirado", 404, undefined, "COUPON_EXPIRED");
     }
 

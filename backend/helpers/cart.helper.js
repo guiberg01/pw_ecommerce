@@ -203,7 +203,7 @@ export const hydrateCartItems = async (items = []) => {
 };
 
 export const getMaxQuantityPerPerson = (product) => {
-  return product?.product?.maxPerPerson ?? product?.stock ?? 1;
+  return product?.product?.maxPerPerson ?? product?.stock ?? Number.POSITIVE_INFINITY;
 };
 
 export const sanitizeCartItems = async (items = []) => {

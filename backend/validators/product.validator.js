@@ -121,8 +121,8 @@ export const updateProductSchema = z
     maxPerPerson: z.number().int().min(1, "Limite máximo deve ser ao menos 1").optional().nullable(),
     status: z.enum(["active", "blocked", "deleted"]).optional(),
     mainVariant: productVariantSchema.partial().optional(),
-    variants: z.array(productVariantUpdateSchema).optional().default([]),
-    removeVariantIds: z.array(mongoIdSchema).optional().default([]),
+    variants: z.array(productVariantUpdateSchema).optional(),
+    removeVariantIds: z.array(mongoIdSchema).optional(),
   })
   .superRefine((data, ctx) => {
     if (data.maxPerPerson != null && data.mainVariant?.stock != null && data.maxPerPerson > data.mainVariant.stock) {

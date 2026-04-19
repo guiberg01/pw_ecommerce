@@ -1,4 +1,5 @@
 import mongoose from "mongoose";
+// Garante o registro do model Category antes de populações em runtime.
 import "./category.model.js";
 
 const couponSchema = new mongoose.Schema(

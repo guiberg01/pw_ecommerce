@@ -25,6 +25,7 @@ import { startCouponExpirationScheduler } from "./jobs/couponExpiration.job.js";
 dotenv.config();
 
 if (process.env.DNS_SERVERS) {
+  // meu mongodb nao tava conseguindo subir sem declarar os dns aqui
   const dnsServers = process.env.DNS_SERVERS.split(",")
     .map((entry) => entry.trim())
     .filter(Boolean);
