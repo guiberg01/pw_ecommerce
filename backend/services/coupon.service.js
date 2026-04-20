@@ -3,25 +3,62 @@ import { createHttpError } from "../helpers/httpError.js";
 import { isDuplicateFieldError } from "../helpers/slugUnique.helper.js";
 
 const activeCouponStatuses = ["active", "sold-out"];
+const DEFAULT_PAGE = 1;
+const DEFAULT_LIMIT = 20;
+const MAX_LIMIT = 100;
 
 const validByExpirationFilter = (now) => ({
   $or: [{ expiresAt: null }, { expiresAt: { $gt: now } }],
+});
+
+const normalizePagination = ({ page = DEFAULT_PAGE, limit = DEFAULT_LIMIT } = {}) => {
+  const normalizedPage = Number.isFinite(Number(page)) ? Math.max(1, Number(page)) : DEFAULT_PAGE;
+  const normalizedLimit = Number.isFinite(Number(limit))
+    ? Math.min(MAX_LIMIT, Math.max(1, Number(limit)))
+    : DEFAULT_LIMIT;
+
+  return {
+    page: normalizedPage,
+    limit: normalizedLimit,
+  };
+};
+
+const buildPaginationResult = (items, total, page, limit) => ({
+  items,
+  pagination: {
+    page,
+    limit,
+    total,
+    totalPages: Math.ceil(total / limit) || 1,
+  },
 });
 
 export const markExpiredCoupons = async (now = new Date()) => {
   return Coupon.updateMany({ status: "active", expiresAt: { $ne: null, $lte: now } }, { $set: { status: "expired" } });
 };
 
-export const findAllCoupons = async () => {
+export const findAllCoupons = async ({ page, limit } = {}) => {
   const now = new Date();
+  const pagination = normalizePagination({ page, limit });
+  const skip = (pagination.page - 1) * pagination.limit;
 
-  return Coupon.find({
+  const filters = {
     status: { $in: activeCouponStatuses },
     ...validByExpirationFilter(now),
-  })
-    .populate("stores", "name slug status")
-    .populate("categories", "name status")
-    .lean();
+  };
+
+  const [items, total] = await Promise.all([
+    Coupon.find(filters)
+      .sort({ createdAt: -1 })
+      .skip(skip)
+      .limit(pagination.limit)
+      .populate("stores", "name slug status")
+      .populate("categories", "name status")
+      .lean(),
+    Coupon.countDocuments(filters),
+  ]);
+
+  return buildPaginationResult(items, total, pagination.page, pagination.limit);
 };
 
 export const findCouponById = async (id) => {

@@ -1,9 +1,12 @@
 import { z } from "zod";
 import { mongoIdSchema } from "./common.validator.js";
+import { paginationQuerySchema } from "./product.validator.js";
 
 export const couponIdParamsSchema = z.object({
   id: mongoIdSchema,
 });
+
+export const couponListQuerySchema = paginationQuerySchema;
 
 export const createCouponSchema = z
   .object({

@@ -11,6 +11,9 @@ import {
 
 const PRODUCT_RESPONSE_POPULATE = "store name slug owner status";
 const MAX_SLUG_RETRIES = 5;
+const DEFAULT_PAGE = 1;
+const DEFAULT_LIMIT = 20;
+const MAX_LIMIT = 100;
 const PRODUCT_FIELDS = ["name", "description", "category", "highlighted", "maxPerPerson", "status"];
 const VARIANT_FIELDS = [
   "attributes",
@@ -123,6 +126,28 @@ const syncStoreCategoriesFromProducts = async (storeId) => {
   await Store.findByIdAndUpdate(storeId, { $set: { categories } });
 };
 
+const normalizePagination = ({ page = DEFAULT_PAGE, limit = DEFAULT_LIMIT } = {}) => {
+  const normalizedPage = Number.isFinite(Number(page)) ? Math.max(1, Number(page)) : DEFAULT_PAGE;
+  const normalizedLimit = Number.isFinite(Number(limit))
+    ? Math.min(MAX_LIMIT, Math.max(1, Number(limit)))
+    : DEFAULT_LIMIT;
+
+  return {
+    page: normalizedPage,
+    limit: normalizedLimit,
+  };
+};
+
+const buildPaginationResult = (items, total, page, limit) => ({
+  items,
+  pagination: {
+    page,
+    limit,
+    total,
+    totalPages: Math.ceil(total / limit) || 1,
+  },
+});
+
 const syncProductVariants = async (productId, mainVariantPayload, extraVariantsPayload = [], removeVariantIds = []) => {
   if (mainVariantPayload) {
     const mainVariant = await ProductVariant.findOne({ product: productId, isMainVariant: true });
@@ -175,11 +200,12 @@ const syncProductVariants = async (productId, mainVariantPayload, extraVariantsP
   }
 };
 
-export const getVisibleProducts = async ({ categoryId } = {}) => {
+export const getVisibleProducts = async ({ categoryId, page, limit } = {}) => {
+  const pagination = normalizePagination({ page, limit });
   const activeStoreIds = await Store.find({ status: "active" }).distinct("_id");
 
   if (activeStoreIds.length === 0) {
-    return [];
+    return buildPaginationResult([], 0, pagination.page, pagination.limit);
   }
 
   const filters = {
@@ -191,15 +217,25 @@ export const getVisibleProducts = async ({ categoryId } = {}) => {
     filters.category = categoryId;
   }
 
-  return Product.find(filters)
-    .populate({
-      path: "store",
-      select: "name slug owner status",
-      match: { status: "active" },
-    })
-    .populate("category", "name status")
-    .populate("mainVariant")
-    .populate("productVariants");
+  const skip = (pagination.page - 1) * pagination.limit;
+
+  const [items, total] = await Promise.all([
+    Product.find(filters)
+      .sort({ createdAt: -1 })
+      .skip(skip)
+      .limit(pagination.limit)
+      .populate({
+        path: "store",
+        select: "name slug owner status",
+        match: { status: "active" },
+      })
+      .populate("category", "name status")
+      .populate("mainVariant")
+      .populate("productVariants"),
+    Product.countDocuments(filters),
+  ]);
+
+  return buildPaginationResult(items, total, pagination.page, pagination.limit);
 };
 
 export const getProduct = async (productId) => {
@@ -360,14 +396,22 @@ export const findStoreByIdOrThrow = async (storeId) => {
   return store;
 };
 
-export const listVisibleStores = async ({ categoryId } = {}) => {
+export const listVisibleStores = async ({ categoryId, page, limit } = {}) => {
   const filters = { status: "active" };
 
   if (categoryId) {
     filters.categories = categoryId;
   }
 
-  return Store.find(filters).sort({ createdAt: -1 });
+  const pagination = normalizePagination({ page, limit });
+  const skip = (pagination.page - 1) * pagination.limit;
+
+  const [items, total] = await Promise.all([
+    Store.find(filters).sort({ createdAt: -1 }).skip(skip).limit(pagination.limit),
+    Store.countDocuments(filters),
+  ]);
+
+  return buildPaginationResult(items, total, pagination.page, pagination.limit);
 };
 
 export const ensureStoreHasNoActiveProducts = async (storeId) => {

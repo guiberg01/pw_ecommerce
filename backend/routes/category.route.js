@@ -12,13 +12,14 @@ import { validateBody, validateParams, validateQuery } from "../middleware/valid
 import {
   categoryAdminListQuerySchema,
   categoryIdParamSchema,
+  categoryListQuerySchema,
   createCategorySchema,
   updateCategorySchema,
 } from "../validators/category.validator.js";
 
 const router = Router();
 
-router.get("/", getAllCategories);
+router.get("/", validateQuery(categoryListQuerySchema), getAllCategories);
 router.get("/admin", isLoggedIn, isAdmin, validateQuery(categoryAdminListQuerySchema), getAllCategoriesForAdmin);
 router.get("/:id", validateParams(categoryIdParamSchema), getCategoryById);
 router.post("/", isLoggedIn, isAdmin, validateBody(createCategorySchema), createCategoryByAdmin);

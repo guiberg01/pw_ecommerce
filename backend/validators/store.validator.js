@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { mongoIdSchema } from "./common.validator.js";
+import { paginationQuerySchema } from "./product.validator.js";
 
 export const createStoreSchema = z.object({
   name: z.string().trim().min(1, "Nome da loja é obrigatório"),
@@ -25,7 +26,7 @@ export const storeIdParamSchema = z.object({
   storeId: mongoIdSchema,
 });
 
-export const storeListQuerySchema = z.object({
+export const storeListQuerySchema = paginationQuerySchema.extend({
   categoryId: mongoIdSchema.optional(),
 });
 

@@ -12,14 +12,30 @@ import Store from "../models/store.model.js";
 
 export const allStoresForAdmin = async (req, res, next) => {
   try {
-    const [stores, myStore] = await Promise.all([
-      Store.find({ status: { $ne: "deleted" } }).populate("owner", "name email role"),
+    const { page = 1, limit = 20 } = req.validatedQuery ?? {};
+    const safePage = Number.isFinite(Number(page)) ? Math.max(1, Number(page)) : 1;
+    const safeLimit = Number.isFinite(Number(limit)) ? Math.min(100, Math.max(1, Number(limit))) : 20;
+    const skip = (safePage - 1) * safeLimit;
+
+    const [stores, total, myStore] = await Promise.all([
+      Store.find({ status: { $ne: "deleted" } })
+        .sort({ createdAt: -1 })
+        .skip(skip)
+        .limit(safeLimit)
+        .populate("owner", "name email role"),
+      Store.countDocuments({ status: { $ne: "deleted" } }),
       Store.findOne({ owner: req.user._id, status: { $ne: "deleted" } }).select("_id"),
     ]);
 
     return sendSuccess(res, 200, "Lojas listadas com sucesso", {
       stores,
       myStoreId: myStore?._id ?? null,
+      pagination: {
+        page: safePage,
+        limit: safeLimit,
+        total,
+        totalPages: Math.ceil(total / safeLimit) || 1,
+      },
     });
   } catch (error) {
     return next(error);
