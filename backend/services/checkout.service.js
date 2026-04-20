@@ -390,6 +390,7 @@ export const createCheckoutIntentForUser = async (userId, payload) => {
   let subTotal;
   let totalDiscount;
   let totalPaidByCustomer;
+  let connectContextByStore;
 
   try {
     await session.withTransaction(async () => {
@@ -425,7 +426,7 @@ export const createCheckoutIntentForUser = async (userId, payload) => {
       totalDiscount = couponContext.discountAmount;
       const totalShippingPrice = 0;
       totalPaidByCustomer = roundMoney(subTotal - totalDiscount + totalShippingPrice);
-      const connectContextByStore = await buildStoreConnectContext(cartContext.groupedByStore, session);
+      connectContextByStore = await buildStoreConnectContext(cartContext.groupedByStore, session);
 
       // Revalida estoque dentro da transação para reduzir risco de corrida.
       const variantIds = cartContext.normalizedItems.map((item) => item.productVariantId);
