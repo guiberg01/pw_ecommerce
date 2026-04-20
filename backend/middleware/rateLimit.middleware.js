@@ -1,8 +1,23 @@
 import { createHttpError } from "../helpers/httpError.js";
 
 const clientBucketByKey = new Map();
+const RATE_LIMIT_CLEANUP_INTERVAL_MS = 60_000;
 
 const now = () => Date.now();
+
+const cleanupHandle = setInterval(() => {
+  const currentTime = now();
+
+  for (const [key, bucket] of clientBucketByKey) {
+    if (bucket.expiresAt <= currentTime) {
+      clientBucketByKey.delete(key);
+    }
+  }
+}, RATE_LIMIT_CLEANUP_INTERVAL_MS);
+
+if (typeof cleanupHandle.unref === "function") {
+  cleanupHandle.unref();
+}
 
 const getClientIp = (req) => {
   const forwarded = req.headers["x-forwarded-for"];

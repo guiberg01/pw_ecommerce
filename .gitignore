@@ -6,6 +6,8 @@ node_modules/
 
 #test de requisição
 test.http
+full_api_validation.mjs
+all_sequential_tests.mjs
 
 #prettier
 .prettierrc

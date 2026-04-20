@@ -729,11 +729,11 @@ const tryDispatchPayoutTransfer = async ({ payout, payment, stripe }) => {
 
 const dispatchPendingPayoutTransfersForOrder = async ({ orderId, paymentId }) => {
   const stripe = getStripeClientOrThrow();
+  const subOrderIds = await SubOrder.find({ order: orderId }).distinct("_id");
+
   const [payment, payouts] = await Promise.all([
     Payment.findById(paymentId).select("_id order stripeChargeId"),
-    Payout.find({ status: "pending" })
-      .where("subOrders")
-      .in(await SubOrder.find({ order: orderId }).distinct("_id")),
+    Payout.find({ status: "pending" }).where("subOrders").in(subOrderIds),
   ]);
 
   if (!payment || payouts.length === 0) return;
