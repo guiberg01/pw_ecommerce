@@ -31,9 +31,7 @@ const groupByOrderId = (items = [], orderField = "order") => {
 const attachOrderRelations = ({ orders, subOrders, payments }) => {
   const subOrdersByOrderId = groupByOrderId(subOrders);
   const paymentByOrderId = new Map(
-    payments
-      .map((payment) => [payment.order?.toString?.(), payment])
-      .filter(([orderId]) => Boolean(orderId)),
+    payments.map((payment) => [payment.order?.toString?.(), payment]).filter(([orderId]) => Boolean(orderId)),
   );
 
   return orders.map((order) => {
@@ -47,21 +45,34 @@ const attachOrderRelations = ({ orders, subOrders, payments }) => {
   });
 };
 
-export const listOrdersForUser = async (userId, { page = 1, limit = 20, status } = {}) => {
+export const listOrdersForUser = async (
+  userId,
+  { page = 1, limit = 20, status, createdFrom, createdTo, sort = "newest" } = {},
+) => {
   const filters = { user: userId };
 
   if (status) {
     filters.status = status;
   }
 
+  if (createdFrom || createdTo) {
+    filters.createdAt = {};
+
+    if (createdFrom) {
+      filters.createdAt.$gte = createdFrom;
+    }
+
+    if (createdTo) {
+      filters.createdAt.$lte = createdTo;
+    }
+  }
+
+  const sortByCreatedAt = sort === "oldest" ? 1 : -1;
+
   const skip = (page - 1) * limit;
 
   const [orders, total] = await Promise.all([
-    Order.find(filters)
-      .sort({ createdAt: -1 })
-      .skip(skip)
-      .limit(limit)
-      .lean(),
+    Order.find(filters).sort({ createdAt: sortByCreatedAt }).skip(skip).limit(limit).lean(),
     Order.countDocuments(filters),
   ]);
 

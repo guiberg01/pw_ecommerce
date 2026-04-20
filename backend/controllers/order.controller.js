@@ -3,8 +3,8 @@ import { findOrderByIdForUserOrThrow, listOrdersForUser } from "../services/orde
 
 export const getMyOrders = async (req, res, next) => {
   try {
-    const { page, limit, status } = req.validatedQuery ?? {};
-    const orders = await listOrdersForUser(req.user._id, { page, limit, status });
+    const { page, limit, status, createdFrom, createdTo, sort } = req.validatedQuery ?? {};
+    const orders = await listOrdersForUser(req.user._id, { page, limit, status, createdFrom, createdTo, sort });
 
     return sendSuccess(res, 200, "Pedidos listados com sucesso", orders);
   } catch (error) {
