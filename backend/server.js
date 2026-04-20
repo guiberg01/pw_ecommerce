@@ -16,6 +16,7 @@ import addressRoutes from "./routes/address.route.js";
 import paymentMethodRoutes from "./routes/paymentMethod.route.js";
 import cartRoutes from "./routes/cart.route.js";
 import couponRoutes from "./routes/coupon.route.js";
+import checkoutRoutes from "./routes/checkout.route.js";
 
 import { connectDB, disconnectDB } from "./config/db.js";
 import { disconnectRedis } from "./config/redis.js";
@@ -24,6 +25,7 @@ import { startCouponExpirationScheduler } from "./jobs/couponExpiration.job.js";
 dotenv.config();
 
 if (process.env.DNS_SERVERS) {
+  // meu mongodb nao tava conseguindo subir sem declarar os dns aqui
   const dnsServers = process.env.DNS_SERVERS.split(",")
     .map((entry) => entry.trim())
     .filter(Boolean);
@@ -54,7 +56,15 @@ let httpServer;
 let shuttingDown = false;
 let stopCouponExpirationScheduler;
 
-app.use(express.json());
+app.use(
+  express.json({
+    verify: (req, res, buf) => {
+      if (req.originalUrl === "/api/checkout/webhook/stripe") {
+        req.rawBody = Buffer.from(buf);
+      }
+    },
+  }),
+);
 app.use(cookieParser());
 
 app.use("/api/auth", authRoutes);
@@ -67,6 +77,7 @@ app.use("/api/addresses", addressRoutes);
 app.use("/api/payment-methods", paymentMethodRoutes);
 app.use("/api/cart", cartRoutes);
 app.use("/api/coupons", couponRoutes);
+app.use("/api/checkout", checkoutRoutes);
 
 app.use((req, res, next) => {
   next(createHttpError("Rota não encontrada", 404, undefined, "ROUTE_NOT_FOUND"));

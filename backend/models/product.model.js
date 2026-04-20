@@ -71,6 +71,7 @@ productSchema.virtual("productVariants", {
   ref: "ProductVariant",
   localField: "_id",
   foreignField: "product",
+  match: { isMainVariant: false },
 });
 
 productSchema.virtual("mainVariant", {

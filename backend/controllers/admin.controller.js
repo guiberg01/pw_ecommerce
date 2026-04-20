@@ -3,7 +3,7 @@ import {
   createProductForStore,
   ensureStoreHasNoActiveProducts,
   findActiveProductOrThrow,
-  findActiveStoreOrThrow,
+  findExistingStoreOrThrow,
   softDeleteProduct,
   softDeleteStore,
   updateProductAndPopulate,
@@ -31,7 +31,7 @@ export const createProductForStoreByAdmin = async (req, res, next) => {
     const { storeId } = req.params;
     const { name, description, category, highlighted, maxPerPerson, mainVariant, variants } = req.body;
 
-    await findActiveStoreOrThrow(storeId);
+    await findExistingStoreOrThrow(storeId);
 
     const productWithStore = await createProductForStore(storeId, {
       name,
@@ -52,7 +52,7 @@ export const createProductForStoreByAdmin = async (req, res, next) => {
 export const deleteStoreByAdmin = async (req, res, next) => {
   try {
     const { storeId } = req.params;
-    await findActiveStoreOrThrow(storeId);
+    await findExistingStoreOrThrow(storeId);
     await ensureStoreHasNoActiveProducts(storeId);
     await softDeleteStore(storeId);
 
@@ -91,7 +91,7 @@ export const updateStoreStatusByAdmin = async (req, res, next) => {
     const { storeId } = req.params;
     const { status } = req.body;
 
-    const store = await findActiveStoreOrThrow(storeId);
+    const store = await findExistingStoreOrThrow(storeId);
 
     store.status = status;
     await store.save();

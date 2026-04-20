@@ -1,5 +1,28 @@
 import mongoose from "mongoose";
 
+const paymentMethodSnapshotSchema = new mongoose.Schema(
+  {
+    type: {
+      type: String,
+      default: null,
+    },
+    brand: {
+      type: String,
+      default: null,
+    },
+    last4: {
+      type: String,
+      default: null,
+    },
+    installments: {
+      type: Number,
+      default: 1,
+      min: 1,
+    },
+  },
+  { _id: false },
+);
+
 const paymentSchema = new mongoose.Schema(
   {
     user: {
@@ -36,25 +59,7 @@ const paymentSchema = new mongoose.Schema(
       trim: true,
     },
     paymentMethod: {
-      type: {
-        type: {
-          type: String,
-          default: null,
-        },
-        brand: {
-          type: String,
-          default: null,
-        },
-        last4: {
-          type: String,
-          default: null,
-        },
-        installments: {
-          type: Number,
-          default: 1,
-          min: 1,
-        },
-      },
+      type: paymentMethodSnapshotSchema,
       default: {},
     },
     gatewayFee: {

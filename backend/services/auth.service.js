@@ -47,7 +47,9 @@ export const endUserSession = async (req, res) => {
     try {
       const decoded = jwt.verify(refreshToken, process.env.REFRESH_TOKEN);
       await deleteRefreshToken(decoded.userId);
-    } catch {}
+    } catch (error) {
+      console.log("Erro ao invalidar refresh token durante logout:", error?.message ?? error);
+    }
   }
 
   res.clearCookie("accessToken");

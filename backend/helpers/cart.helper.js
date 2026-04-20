@@ -203,7 +203,7 @@ export const hydrateCartItems = async (items = []) => {
 };
 
 export const getMaxQuantityPerPerson = (product) => {
-  return product?.product?.maxPerPerson ?? product?.stock ?? 1;
+  return product?.product?.maxPerPerson ?? product?.stock ?? Number.POSITIVE_INFINITY;
 };
 
 export const sanitizeCartItems = async (items = []) => {
@@ -237,10 +237,18 @@ export const upsertCartItem = (items = [], productId, quantity, { increment = fa
   }
 
   const itemMap = new Map(
-    items.map((item) => [
-      getCartItemVariantId(item.productVariant),
-      { ...item, productVariant: getCartItemVariantId(item.productVariant) },
-    ]),
+    items
+      .map((item) => {
+        const productVariantId = getCartItemVariantId(item.productVariant);
+        const itemQuantity = Math.trunc(Number(item.quantity ?? 0));
+
+        if (!productVariantId || !Number.isFinite(itemQuantity)) {
+          return null;
+        }
+
+        return [productVariantId, { productVariant: productVariantId, quantity: itemQuantity }];
+      })
+      .filter(Boolean),
   );
   const currentQuantity = Number(itemMap.get(normalizedProductId)?.quantity ?? 0);
 

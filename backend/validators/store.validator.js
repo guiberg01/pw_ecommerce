@@ -28,3 +28,8 @@ export const storeIdParamSchema = z.object({
 export const storeListQuerySchema = z.object({
   categoryId: mongoIdSchema.optional(),
 });
+
+export const stripeOnboardingLinkSchema = z.object({
+  refreshUrl: z.url("Refresh URL inválida"),
+  returnUrl: z.url("Return URL inválida"),
+});
