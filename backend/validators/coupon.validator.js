@@ -12,7 +12,9 @@ export const createCouponSchema = z
       .trim()
       .min(1, "Código de cupom é obrigatório")
       .transform((value) => value.toUpperCase()),
-    discountType: z.enum(["percentage", "fixed"], "Tipo de desconto deve ser porcentagem ou fixo"),
+    discountType: z.enum(["percentage", "fixed"], {
+      error: "Tipo de desconto deve ser porcentagem ou fixo",
+    }),
     discountValue: z.number().positive("Valor do desconto deve ser maior que zero"),
     minOrderValue: z.number().min(0, "Valor mínimo do pedido deve ser zero ou positivo").optional(),
     maxUses: z.number().int().positive("Número máximo de usos deve ser um inteiro positivo").optional(),

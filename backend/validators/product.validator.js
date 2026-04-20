@@ -10,7 +10,7 @@ const productVariantSchema = z.object({
     .trim()
     .min(1, "SKU é obrigatório")
     .transform((value) => value.toUpperCase()),
-  imageUrl: z.url("A imagem deve ser uma URL válida").trim(),
+  imageUrl: z.string().trim().url("A imagem deve ser uma URL válida"),
   datasheet: z.string().trim().optional().nullable(),
   weight: z.number().min(0, "Peso deve ser maior ou igual a zero").optional().nullable(),
   length: z.number().min(0, "Comprimento deve ser maior ou igual a zero").optional().nullable(),
@@ -30,7 +30,7 @@ const productVariantUpdateSchema = z
       .min(1, "SKU é obrigatório")
       .transform((value) => value.toUpperCase())
       .optional(),
-    imageUrl: z.url("A imagem deve ser uma URL válida").trim().optional(),
+    imageUrl: z.string().trim().url("A imagem deve ser uma URL válida").optional(),
     datasheet: z.string().trim().optional().nullable(),
     weight: z.number().min(0, "Peso deve ser maior ou igual a zero").optional().nullable(),
     length: z.number().min(0, "Comprimento deve ser maior ou igual a zero").optional().nullable(),

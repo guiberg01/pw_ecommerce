@@ -30,6 +30,6 @@ export const storeListQuerySchema = z.object({
 });
 
 export const stripeOnboardingLinkSchema = z.object({
-  refreshUrl: z.url("Refresh URL inválida"),
-  returnUrl: z.url("Return URL inválida"),
+  refreshUrl: z.string().trim().url("Refresh URL inválida"),
+  returnUrl: z.string().trim().url("Return URL inválida"),
 });
