@@ -17,9 +17,11 @@ import paymentMethodRoutes from "./routes/paymentMethod.route.js";
 import cartRoutes from "./routes/cart.route.js";
 import couponRoutes from "./routes/coupon.route.js";
 import checkoutRoutes from "./routes/checkout.route.js";
+import uploadRoutes from "./routes/upload.route.js";
 
 import { connectDB, disconnectDB } from "./config/db.js";
 import { disconnectRedis } from "./config/redis.js";
+import { ensureUploadDirectoryExists, getUploadDirectoryPath } from "./config/upload.js";
 import { startCouponExpirationScheduler } from "./jobs/couponExpiration.job.js";
 
 dotenv.config();
@@ -73,6 +75,7 @@ app.use(
   }),
 );
 app.use(cookieParser());
+app.use("/uploads", express.static(getUploadDirectoryPath()));
 
 app.use("/api/auth", authRoutes);
 app.use("/api/admin", adminRoutes);
@@ -85,6 +88,7 @@ app.use("/api/payment-methods", paymentMethodRoutes);
 app.use("/api/cart", cartRoutes);
 app.use("/api/coupons", couponRoutes);
 app.use("/api/checkout", checkoutRoutes);
+app.use("/api/uploads", uploadRoutes);
 
 app.use((req, res, next) => {
   next(createHttpError("Rota não encontrada", 404, undefined, "ROUTE_NOT_FOUND"));
@@ -95,6 +99,7 @@ app.use(errorHandler);
 const bootstrap = async () => {
   try {
     validateRequiredEnv();
+    await ensureUploadDirectoryExists();
     await connectDB();
     stopCouponExpirationScheduler = startCouponExpirationScheduler();
 

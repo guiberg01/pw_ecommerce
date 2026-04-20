@@ -9,5 +9,8 @@ test.http
 full_api_validation.mjs
 all_sequential_tests.mjs
 
+#uploads locais
+backend/uploads/
+
 #prettier
 .prettierrc
