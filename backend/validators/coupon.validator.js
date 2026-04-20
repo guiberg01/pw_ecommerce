@@ -12,7 +12,9 @@ export const createCouponSchema = z
       .trim()
       .min(1, "Código de cupom é obrigatório")
       .transform((value) => value.toUpperCase()),
-    discountType: z.enum(["percentage", "fixed"], "Tipo de desconto deve ser porcentagem ou fixo"),
+    discountType: z.enum(["percentage", "fixed"], {
+      error: "Tipo de desconto deve ser porcentagem ou fixo",
+    }),
     discountValue: z.number().positive("Valor do desconto deve ser maior que zero"),
     minOrderValue: z.number().min(0, "Valor mínimo do pedido deve ser zero ou positivo").optional(),
     maxUses: z.number().int().positive("Número máximo de usos deve ser um inteiro positivo").optional(),
@@ -35,7 +37,7 @@ export const createCouponSchema = z
   .superRefine((data, ctx) => {
     if (data.discountType === "percentage" && data.discountValue > 100) {
       ctx.addIssue({
-        code: z.ZodIssueCode.custom,
+        code: "custom",
         path: ["discountValue"],
         message: "Desconto percentual não pode ultrapassar 100%",
       });
@@ -47,7 +49,7 @@ export const createCouponSchema = z
       data.maxUsesPerUser > data.maxUses
     ) {
       ctx.addIssue({
-        code: z.ZodIssueCode.custom,
+        code: "custom",
         path: ["maxUsesPerUser"],
         message: "Uso máximo por usuário não pode ser maior que o uso máximo total",
       });

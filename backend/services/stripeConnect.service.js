@@ -4,6 +4,7 @@ import { createHttpError } from "../helpers/httpError.js";
 import { dispatchPendingPayoutTransfersForStore } from "./checkout.service.js";
 
 const stripeClient = process.env.STRIPE_SECRET_KEY ? new Stripe(process.env.STRIPE_SECRET_KEY) : null;
+const inFlightStripeAccountProvisionByStore = new Map();
 
 const getStripeClientOrThrow = () => {
   if (!stripeClient) {
@@ -28,25 +29,63 @@ const ensureStripeAccountForStore = async (store) => {
     return store.stripeConnectId;
   }
 
-  const stripe = getStripeClientOrThrow();
+  const storeKey = store._id.toString();
+  if (inFlightStripeAccountProvisionByStore.has(storeKey)) {
+    return inFlightStripeAccountProvisionByStore.get(storeKey);
+  }
 
-  const account = await stripe.accounts.create({
-    type: "express",
-    country: "BR",
-    capabilities: {
-      card_payments: { requested: true },
-      transfers: { requested: true },
-    },
-    metadata: {
-      storeId: store._id.toString(),
-      ownerId: store.owner.toString(),
-    },
-  });
+  const accountProvisionPromise = (async () => {
+    const freshStore = await Store.findById(store._id).select("stripeConnectId owner");
+    if (!freshStore) {
+      throw createHttpError("Loja não encontrada", 404, undefined, "STORE_NOT_FOUND");
+    }
 
-  store.stripeConnectId = account.id;
-  await store.save();
+    if (freshStore.stripeConnectId) {
+      return freshStore.stripeConnectId;
+    }
 
-  return account.id;
+    const stripe = getStripeClientOrThrow();
+    const account = await stripe.accounts.create({
+      type: "express",
+      country: "BR",
+      capabilities: {
+        card_payments: { requested: true },
+        transfers: { requested: true },
+      },
+      metadata: {
+        storeId: freshStore._id.toString(),
+        ownerId: freshStore.owner.toString(),
+      },
+    });
+
+    const updatedStore = await Store.findOneAndUpdate(
+      {
+        _id: freshStore._id,
+        $or: [{ stripeConnectId: { $exists: false } }, { stripeConnectId: null }, { stripeConnectId: "" }],
+      },
+      { $set: { stripeConnectId: account.id } },
+      { new: true },
+    ).select("stripeConnectId");
+
+    if (updatedStore?.stripeConnectId) {
+      return updatedStore.stripeConnectId;
+    }
+
+    const storeWithAccount = await Store.findById(freshStore._id).select("stripeConnectId");
+    if (storeWithAccount?.stripeConnectId) {
+      return storeWithAccount.stripeConnectId;
+    }
+
+    return account.id;
+  })();
+
+  inFlightStripeAccountProvisionByStore.set(storeKey, accountProvisionPromise);
+
+  try {
+    return await accountProvisionPromise;
+  } finally {
+    inFlightStripeAccountProvisionByStore.delete(storeKey);
+  }
 };
 
 export const createStripeOnboardingLinkForStoreOwner = async (ownerId, { refreshUrl, returnUrl }) => {
