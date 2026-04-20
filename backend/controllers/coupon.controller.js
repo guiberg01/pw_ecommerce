@@ -3,7 +3,8 @@ import { sendSuccess } from "../helpers/successResponse.js";
 
 export const getAllCoupons = async (req, res, next) => {
   try {
-    const allCoupons = await findAllCoupons();
+    const { page, limit } = req.validatedQuery ?? {};
+    const allCoupons = await findAllCoupons({ page, limit });
 
     return sendSuccess(res, 200, "Cupons encontrados com sucesso", allCoupons);
   } catch (error) {
