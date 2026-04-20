@@ -56,10 +56,17 @@ let httpServer;
 let shuttingDown = false;
 let stopCouponExpirationScheduler;
 
+const isStripeCheckoutWebhookRequest = (req) => {
+  const originalUrl = String(req.originalUrl ?? "");
+  const url = String(req.url ?? "");
+
+  return originalUrl.startsWith("/api/checkout/webhook/stripe") || url.startsWith("/api/checkout/webhook/stripe");
+};
+
 app.use(
   express.json({
     verify: (req, res, buf) => {
-      if (req.originalUrl === "/api/checkout/webhook/stripe") {
+      if (isStripeCheckoutWebhookRequest(req)) {
         req.rawBody = Buffer.from(buf);
       }
     },

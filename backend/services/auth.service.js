@@ -71,9 +71,7 @@ export const rotateAccessToken = async (req, res) => {
     throw createHttpError("Refresh token inválido", 403, undefined, "AUTH_REFRESH_TOKEN_INVALID");
   }
 
-  const accessToken = jwt.sign({ userId: decoded.userId }, process.env.ACCESS_TOKEN, {
-    expiresIn: "15m",
-  });
-
-  setAuthCookie(res, "accessToken", accessToken, ACCESS_COOKIE_AGE_MS);
+  const { accessToken, refreshToken: newRefreshToken } = generateTokens(decoded.userId);
+  await setRefreshToken(decoded.userId, newRefreshToken);
+  setSessionCookies(res, accessToken, newRefreshToken);
 };

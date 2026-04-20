@@ -1,4 +1,4 @@
-import { Coupon } from "../models/coupon.model.js";
+import Coupon from "../models/coupon.model.js";
 import { createHttpError } from "../helpers/httpError.js";
 import { isDuplicateFieldError } from "../helpers/slugUnique.helper.js";
 

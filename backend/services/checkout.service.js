@@ -512,24 +512,89 @@ export const createCheckoutIntentForUser = async (userId, payload) => {
       );
     });
 
-    const stripeIntent = await getStripeClientOrThrow().paymentIntents.create({
-      amount: Math.round(totalPaidByCustomer * 100),
-      currency: "brl",
-      automatic_payment_methods: { enabled: true },
-      transfer_group: `order_${order._id}`,
-      metadata: {
-        orderId: order._id.toString(),
-        paymentId: payment._id.toString(),
-        userId: userId.toString(),
-        storeCount: String(connectContextByStore.size),
-      },
-    });
+    let stripeIntent;
+    try {
+      stripeIntent = await getStripeClientOrThrow().paymentIntents.create({
+        amount: Math.round(totalPaidByCustomer * 100),
+        currency: "brl",
+        automatic_payment_methods: { enabled: true },
+        transfer_group: `order_${order._id}`,
+        metadata: {
+          orderId: order._id.toString(),
+          paymentId: payment._id.toString(),
+          userId: userId.toString(),
+          storeCount: String(connectContextByStore.size),
+        },
+      });
+    } catch (error) {
+      await Promise.all([
+        Payment.updateOne(
+          { _id: payment._id, status: "pending" },
+          {
+            $set: { status: "failed" },
+            $push: {
+              events: {
+                type: "checkout_intent_failed",
+                at: new Date(),
+                metadata: {
+                  reason: error?.message ?? "stripe_intent_creation_failed",
+                },
+              },
+            },
+          },
+        ),
+        Order.updateOne({ _id: order._id, status: "pending" }, { $set: { status: "failed" } }),
+        SubOrder.updateMany({ order: order._id, status: "pending" }, { $set: { status: "failed" } }),
+      ]);
 
-    payment.stripePaymentIntentId = stripeIntent.id;
-    await payment.save();
+      throw createHttpError(
+        "Falha ao iniciar pagamento no provedor",
+        502,
+        { orderId: order._id, paymentId: payment._id },
+        "CHECKOUT_PAYMENT_INTENT_CREATION_FAILED",
+      );
+    }
 
-    order.stripePaymentId = stripeIntent.id;
-    await order.save();
+    try {
+      payment.stripePaymentIntentId = stripeIntent.id;
+      order.stripePaymentId = stripeIntent.id;
+
+      await Promise.all([payment.save(), order.save()]);
+    } catch (error) {
+      try {
+        await getStripeClientOrThrow().paymentIntents.cancel(stripeIntent.id);
+      } catch {
+        // Se falhar para cancelar, o evento permanece rastreável via metadata no Stripe.
+      }
+
+      await Promise.all([
+        Payment.updateOne(
+          { _id: payment._id },
+          {
+            $set: { status: "failed" },
+            $push: {
+              events: {
+                type: "checkout_intent_persistence_failed",
+                at: new Date(),
+                metadata: {
+                  stripePaymentIntentId: stripeIntent.id,
+                  reason: error?.message ?? "persist_failed_after_intent_creation",
+                },
+              },
+            },
+          },
+        ),
+        Order.updateOne({ _id: order._id, status: "pending" }, { $set: { status: "failed" } }),
+        SubOrder.updateMany({ order: order._id, status: "pending" }, { $set: { status: "failed" } }),
+      ]);
+
+      throw createHttpError(
+        "Falha ao persistir dados do pagamento",
+        500,
+        { orderId: order._id, paymentId: payment._id, stripePaymentIntentId: stripeIntent.id },
+        "CHECKOUT_PAYMENT_PERSISTENCE_FAILED",
+      );
+    }
 
     return {
       orderId: order._id,
@@ -568,7 +633,14 @@ const markPaymentAsFailedByIntentId = async ({ stripePaymentIntentId, stripeEven
   try {
     await session.withTransaction(async () => {
       const payment = await Payment.findOne({ stripePaymentIntentId }).session(session);
-      if (!payment) return;
+      if (!payment) {
+        throw createHttpError(
+          "Pagamento ainda não registrado para esse evento",
+          409,
+          { stripePaymentIntentId, stripeEventId, eventType },
+          "CHECKOUT_WEBHOOK_PAYMENT_NOT_READY",
+        );
+      }
 
       if (isEventAlreadyProcessed(payment, stripeEventId)) return;
 
@@ -709,7 +781,14 @@ const markPaymentAsSucceededByIntentId = async ({ stripePaymentIntent, stripeEve
   try {
     await session.withTransaction(async () => {
       const payment = await Payment.findOne({ stripePaymentIntentId }).session(session);
-      if (!payment) return;
+      if (!payment) {
+        throw createHttpError(
+          "Pagamento ainda não registrado para esse evento",
+          409,
+          { stripePaymentIntentId, stripeEventId },
+          "CHECKOUT_WEBHOOK_PAYMENT_NOT_READY",
+        );
+      }
 
       if (isEventAlreadyProcessed(payment, stripeEventId)) return;
 
