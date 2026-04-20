@@ -16,8 +16,8 @@ const canManageProduct = (product, user) => {
 
 export const allProducts = async (req, res, next) => {
   try {
-    const { categoryId } = req.validatedQuery ?? {};
-    const visibleProducts = await getVisibleProducts({ categoryId });
+    const { categoryId, page, limit } = req.validatedQuery ?? {};
+    const visibleProducts = await getVisibleProducts({ categoryId, page, limit });
 
     return sendSuccess(res, 200, "Produtos listados com sucesso", visibleProducts);
   } catch (error) {

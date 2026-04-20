@@ -2,6 +2,7 @@ import jwt from "jsonwebtoken";
 import { clearGuestCartCookie, syncGuestCartToUserCart } from "../helpers/cart.helper.js";
 import { deleteRefreshToken, getRefreshToken, setRefreshToken } from "../helpers/redisAuth.helper.js";
 import { createHttpError } from "../helpers/httpError.js";
+import User from "../models/user.model.js";
 
 const ACCESS_COOKIE_AGE_MS = 15 * 60 * 1000;
 const REFRESH_COOKIE_AGE_MS = 7 * 24 * 60 * 60 * 1000;
@@ -69,6 +70,13 @@ export const rotateAccessToken = async (req, res) => {
 
   if (storedToken !== refreshToken) {
     throw createHttpError("Refresh token inválido", 403, undefined, "AUTH_REFRESH_TOKEN_INVALID");
+  }
+
+  const user = await User.findById(decoded.userId).select("_id status");
+
+  if (!user || user.status !== "active") {
+    await deleteRefreshToken(decoded.userId);
+    throw createHttpError("Usuário inválido ou inativo", 403, undefined, "AUTH_USER_INACTIVE");
   }
 
   const { accessToken, refreshToken: newRefreshToken } = generateTokens(decoded.userId);

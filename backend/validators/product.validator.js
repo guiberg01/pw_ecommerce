@@ -1,6 +1,11 @@
 import { z } from "zod";
 import { mongoIdSchema } from "./common.validator.js";
 
+export const paginationQuerySchema = z.object({
+  page: z.coerce.number().int().min(1, "A página deve ser maior que zero").optional().default(1),
+  limit: z.coerce.number().int().min(1, "O limite deve ser maior que zero").max(100).optional().default(20),
+});
+
 const productVariantSchema = z.object({
   attributes: z.record(z.string(), z.string()).optional().default({}),
   price: z.number().positive("Preço deve ser maior que zero"),
@@ -157,6 +162,6 @@ export const productVariantIdParamSchema = z.object({
   id: mongoIdSchema,
 });
 
-export const productListQuerySchema = z.object({
+export const productListQuerySchema = paginationQuerySchema.extend({
   categoryId: mongoIdSchema.optional(),
 });

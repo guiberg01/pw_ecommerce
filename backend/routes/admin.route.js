@@ -8,13 +8,13 @@ import {
   updateStoreStatusByAdmin,
 } from "../controllers/admin.controller.js";
 import { isAdmin, isLoggedIn } from "../middleware/auth.middleware.js";
-import { validateBody, validateParams } from "../middleware/validation.middleware.js";
+import { validateBody, validateParams, validateQuery } from "../middleware/validation.middleware.js";
 import { createProductSchema, productIdParamSchema, updateProductSchema } from "../validators/product.validator.js";
-import { storeIdParamSchema, updateStoreStatusByAdminSchema } from "../validators/store.validator.js";
+import { storeIdParamSchema, storeListQuerySchema, updateStoreStatusByAdminSchema } from "../validators/store.validator.js";
 
 const router = Router();
 
-router.get("/stores", isLoggedIn, isAdmin, allStoresForAdmin);
+router.get("/stores", isLoggedIn, isAdmin, validateQuery(storeListQuerySchema), allStoresForAdmin);
 router.post(
   "/stores/:storeId/products",
   isLoggedIn,

@@ -17,8 +17,8 @@ import {
 
 export const allStores = async (req, res, next) => {
   try {
-    const { categoryId } = req.validatedQuery ?? {};
-    const stores = await listVisibleStores({ categoryId });
+    const { categoryId, page, limit } = req.validatedQuery ?? {};
+    const stores = await listVisibleStores({ categoryId, page, limit });
     return sendSuccess(res, 200, "Lojas listadas com sucesso", stores);
   } catch (error) {
     return next(error);
