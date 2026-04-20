@@ -58,6 +58,28 @@ let httpServer;
 let shuttingDown = false;
 let stopCouponExpirationScheduler;
 
+const resolveTrustProxyValue = () => {
+  const rawValue = process.env.TRUST_PROXY;
+
+  if (rawValue === undefined) {
+    return false;
+  }
+
+  const normalized = String(rawValue).trim().toLowerCase();
+
+  if (normalized === "true") return true;
+  if (normalized === "false") return false;
+
+  const numericValue = Number(normalized);
+  if (Number.isFinite(numericValue)) {
+    return numericValue;
+  }
+
+  return rawValue;
+};
+
+app.set("trust proxy", resolveTrustProxyValue());
+
 const isStripeCheckoutWebhookRequest = (req) => {
   const originalUrl = String(req.originalUrl ?? "");
   const url = String(req.url ?? "");
