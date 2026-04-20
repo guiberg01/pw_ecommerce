@@ -6,14 +6,14 @@ import { endUserSession, rotateAccessToken, startUserSession } from "../services
 
 export const signup = async (req, res, next) => {
   try {
-    const { name, email, password } = req.body;
+    const { name, email, password, role } = req.body;
     const userExists = await User.findOne({ email });
 
     if (userExists) {
       throw createHttpError("Usuário já existe", 400, undefined, "AUTH_USER_ALREADY_EXISTS");
     }
 
-    const user = await User.create({ name, email, password });
+    const user = await User.create({ name, email, password, role });
 
     await startUserSession(req, res, user._id);
 
