@@ -20,7 +20,8 @@ export const getAllCategoriesForAdmin = async (req, res, next) => {
 
 export const getAllCategories = async (req, res, next) => {
   try {
-    const categories = await listActiveCategories();
+    const { page, limit } = req.validatedQuery ?? {};
+    const categories = await listActiveCategories({ page, limit });
     return sendSuccess(res, 200, "Categorias listadas com sucesso", categories);
   } catch (error) {
     return next(error);

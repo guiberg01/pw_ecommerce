@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { mongoIdSchema } from "./common.validator.js";
+import { paginationQuerySchema } from "./product.validator.js";
 
 export const categoryIdParamSchema = z.object({
   id: mongoIdSchema,
@@ -27,6 +28,8 @@ export const categoryAdminListQuerySchema = z.object({
     message: "O limite máximo por página é 100",
   }),
 });
+
+export const categoryListQuerySchema = paginationQuerySchema;
 
 export const updateCategorySchema = z
   .object({
