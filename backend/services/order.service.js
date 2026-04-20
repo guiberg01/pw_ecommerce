@@ -20,27 +20,6 @@ const getTimestamp = (value) => {
   return Number.isFinite(timestamp) ? timestamp : 0;
 };
 
-const normalizeCreatedTo = (createdTo) => {
-  if (!createdTo) return undefined;
-
-  const normalizedDate = new Date(createdTo);
-  if (!Number.isFinite(normalizedDate.getTime())) {
-    return createdTo;
-  }
-
-  // If only a date was provided and time is midnight, include the full day window.
-  if (
-    normalizedDate.getHours() === 0 &&
-    normalizedDate.getMinutes() === 0 &&
-    normalizedDate.getSeconds() === 0 &&
-    normalizedDate.getMilliseconds() === 0
-  ) {
-    normalizedDate.setHours(23, 59, 59, 999);
-  }
-
-  return normalizedDate;
-};
-
 const sortPaymentAttempts = (payments = []) => {
   return [...payments].sort((a, b) => {
     const byPriority = getPaymentStatusPriority(b.status) - getPaymentStatusPriority(a.status);
@@ -142,7 +121,7 @@ export const listOrdersForUser = async (
     }
 
     if (createdTo) {
-      filters.createdAt.$lte = normalizeCreatedTo(createdTo);
+      filters.createdAt.$lte = createdTo;
     }
   }
 
