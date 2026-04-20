@@ -10,7 +10,7 @@ const productVariantSchema = z.object({
     .trim()
     .min(1, "SKU é obrigatório")
     .transform((value) => value.toUpperCase()),
-  imageUrl: z.string().trim().url("A imagem deve ser uma URL válida"),
+  imageUrl: z.url("A imagem deve ser uma URL válida").trim(),
   datasheet: z.string().trim().optional().nullable(),
   weight: z.number().min(0, "Peso deve ser maior ou igual a zero").optional().nullable(),
   length: z.number().min(0, "Comprimento deve ser maior ou igual a zero").optional().nullable(),
@@ -30,7 +30,7 @@ const productVariantUpdateSchema = z
       .min(1, "SKU é obrigatório")
       .transform((value) => value.toUpperCase())
       .optional(),
-    imageUrl: z.string().trim().url("A imagem deve ser uma URL válida").optional(),
+    imageUrl: z.url("A imagem deve ser uma URL válida").trim().optional(),
     datasheet: z.string().trim().optional().nullable(),
     weight: z.number().min(0, "Peso deve ser maior ou igual a zero").optional().nullable(),
     length: z.number().min(0, "Comprimento deve ser maior ou igual a zero").optional().nullable(),
@@ -43,7 +43,7 @@ const productVariantUpdateSchema = z
     if (!data.variantId) {
       if (data.price === undefined) {
         ctx.addIssue({
-          code: z.ZodIssueCode.custom,
+          code: "custom",
           path: ["price"],
           message: "Preço é obrigatório para criar uma variação extra",
         });
@@ -51,7 +51,7 @@ const productVariantUpdateSchema = z
 
       if (data.stock === undefined) {
         ctx.addIssue({
-          code: z.ZodIssueCode.custom,
+          code: "custom",
           path: ["stock"],
           message: "Estoque é obrigatório para criar uma variação extra",
         });
@@ -59,7 +59,7 @@ const productVariantUpdateSchema = z
 
       if (data.sku === undefined) {
         ctx.addIssue({
-          code: z.ZodIssueCode.custom,
+          code: "custom",
           path: ["sku"],
           message: "SKU é obrigatório para criar uma variação extra",
         });
@@ -67,7 +67,7 @@ const productVariantUpdateSchema = z
 
       if (data.imageUrl === undefined) {
         ctx.addIssue({
-          code: z.ZodIssueCode.custom,
+          code: "custom",
           path: ["imageUrl"],
           message: "Imagem é obrigatória para criar uma variação extra",
         });
@@ -76,7 +76,7 @@ const productVariantUpdateSchema = z
 
     if (data.variantId && !hasAnyField) {
       ctx.addIssue({
-        code: z.ZodIssueCode.custom,
+        code: "custom",
         path: ["variantId"],
         message: "Envie ao menos um campo para atualizar a variação",
       });
@@ -96,7 +96,7 @@ export const createProductSchema = z
   .superRefine((data, ctx) => {
     if (data.maxPerPerson != null && data.maxPerPerson > data.mainVariant.stock) {
       ctx.addIssue({
-        code: z.ZodIssueCode.custom,
+        code: "custom",
         path: ["maxPerPerson"],
         message: "O limite máximo por pessoa não pode ser maior que o estoque",
       });
@@ -105,7 +105,7 @@ export const createProductSchema = z
     const skus = [data.mainVariant.sku, ...data.variants.map((variant) => variant.sku)];
     if (new Set(skus).size !== skus.length) {
       ctx.addIssue({
-        code: z.ZodIssueCode.custom,
+        code: "custom",
         path: ["variants"],
         message: "Não é permitido repetir SKU entre a variação principal e as variações extras",
       });
@@ -127,7 +127,7 @@ export const updateProductSchema = z
   .superRefine((data, ctx) => {
     if (data.maxPerPerson != null && data.mainVariant?.stock != null && data.maxPerPerson > data.mainVariant.stock) {
       ctx.addIssue({
-        code: z.ZodIssueCode.custom,
+        code: "custom",
         path: ["maxPerPerson"],
         message: "O limite máximo por pessoa não pode ser maior que o estoque",
       });
@@ -138,7 +138,7 @@ export const updateProductSchema = z
 
       if (new Set(skus).size !== skus.length) {
         ctx.addIssue({
-          code: z.ZodIssueCode.custom,
+          code: "custom",
           path: ["variants"],
           message: "Não é permitido repetir SKU entre variações",
         });

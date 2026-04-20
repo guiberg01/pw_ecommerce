@@ -37,7 +37,7 @@ export const createCouponSchema = z
   .superRefine((data, ctx) => {
     if (data.discountType === "percentage" && data.discountValue > 100) {
       ctx.addIssue({
-        code: z.ZodIssueCode.custom,
+        code: "custom",
         path: ["discountValue"],
         message: "Desconto percentual não pode ultrapassar 100%",
       });
@@ -49,7 +49,7 @@ export const createCouponSchema = z
       data.maxUsesPerUser > data.maxUses
     ) {
       ctx.addIssue({
-        code: z.ZodIssueCode.custom,
+        code: "custom",
         path: ["maxUsesPerUser"],
         message: "Uso máximo por usuário não pode ser maior que o uso máximo total",
       });
