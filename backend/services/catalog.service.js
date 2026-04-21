@@ -8,6 +8,7 @@ import {
   isDuplicateFieldError,
   saveDocumentWithUniqueSlug,
 } from "../helpers/slugUnique.helper.js";
+import { notifyProductDiscountForCustomers, notifyPromotionForCustomers } from "./notification.service.js";
 
 const PRODUCT_RESPONSE_POPULATE = "store name slug owner status";
 const MAX_SLUG_RETRIES = 5;
@@ -475,6 +476,11 @@ export const findActiveProductOrThrow = async (productId, { populateStoreOwner =
 };
 
 export const updateProductAndPopulate = async (product, payload) => {
+  const previousHighlighted = Boolean(product.highlighted);
+  const previousMainVariant = await ProductVariant.findOne({ product: product._id, isMainVariant: true })
+    .select("price")
+    .lean();
+
   const productPayload = extractProductPayload(payload);
   const mainVariantPayload = extractMainVariantPayload(payload);
   const extraVariantsPayload = extractExtraVariantsPayload(payload);
@@ -500,6 +506,29 @@ export const updateProductAndPopulate = async (product, payload) => {
   }
 
   await syncStoreCategoriesFromProducts(product.store);
+
+  const updatedMainVariant = await ProductVariant.findOne({ product: product._id, isMainVariant: true })
+    .select("price")
+    .lean();
+
+  if (
+    previousMainVariant?.price != null
+    && updatedMainVariant?.price != null
+    && Number(updatedMainVariant.price) < Number(previousMainVariant.price)
+  ) {
+    await notifyProductDiscountForCustomers({
+      productId: product._id,
+      oldPrice: previousMainVariant.price,
+      newPrice: updatedMainVariant.price,
+    });
+  }
+
+  if (!previousHighlighted && product.highlighted === true) {
+    await notifyPromotionForCustomers({
+      productId: product._id,
+      productName: product.name,
+    });
+  }
 
   return populateProductById(product._id);
 };
