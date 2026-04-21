@@ -1,6 +1,7 @@
 import mongoose from "mongoose";
 import Order from "../models/order.model.js";
 import SubOrder from "../models/subOrder.model.js";
+import Shipping from "../models/shipping.model.js";
 import { createHttpError } from "../helpers/httpError.js";
 import { findActiveStoreByOwnerOrThrow } from "./catalog.service.js";
 import { findSellerOrderByIdOrThrow } from "./storeOrder.service.js";
@@ -17,7 +18,7 @@ const SELLER_STATUS_FLOW = {
 
 const ORDER_PAID_LIKE_STATUSES = new Set(["paid", "processing", "shipping", "delivered"]);
 
-const ensureValidSellerStatusTransitionOrThrow = (currentStatus, nextStatus) => {
+const ensureValidSellerStatusTransitionOrThrow = async (currentStatus, nextStatus, subOrderId) => {
   if (currentStatus === "pending") {
     throw createHttpError(
       "O pagamento ainda não foi confirmado para iniciar a operação do pedido",
@@ -45,6 +46,23 @@ const ensureValidSellerStatusTransitionOrThrow = (currentStatus, nextStatus) => 
       { currentStatus, requestedStatus: nextStatus, allowedStatuses },
       "SELLER_SUBORDER_STATUS_TRANSITION_FORBIDDEN",
     );
+  }
+
+  // Validação adicional: para transicionar para "shipping", etiqueta deve existir
+  if (nextStatus === "shipping") {
+    const shipping = await Shipping.findOne({
+      subOrder: subOrderId,
+      status: { $in: ["posted", "in_transit"] },
+    });
+
+    if (!shipping) {
+      throw createHttpError(
+        "Etiqueta de envio não foi gerada. Gere a etiqueta antes de transicionar para 'shipping'",
+        409,
+        { subOrderId, nextStatus },
+        "SELLER_SHIPPING_LABEL_NOT_GENERATED",
+      );
+    }
   }
 };
 
@@ -103,7 +121,7 @@ export const updateSellerOrderStatus = async (ownerId, orderId, { status }) => {
         throw createHttpError("Pedido não encontrado", 404, undefined, "SELLER_ORDER_NOT_FOUND");
       }
 
-      ensureValidSellerStatusTransitionOrThrow(subOrder.status, status);
+      await ensureValidSellerStatusTransitionOrThrow(subOrder.status, status, subOrder._id);
 
       const updatedSubOrder = await SubOrder.updateOne(
         { _id: subOrder._id, status: subOrder.status },

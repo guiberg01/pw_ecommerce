@@ -33,6 +33,25 @@ const shippingSchema = new mongoose.Schema(
       default: null,
       trim: true,
     },
+    carrier: {
+      type: String,
+      enum: ["sedex", "pac", "jadlog", "loggi", "azul", "correios"],
+      default: null,
+    },
+    whoPays: {
+      type: String,
+      enum: ["customer_pays", "platform_paid"],
+      default: "customer_pays",
+    },
+    shippingCost: {
+      type: Number,
+      min: 0,
+      default: 0,
+    },
+    estimatedDeliveryDate: {
+      type: Date,
+      default: null,
+    },
     status: {
       type: String,
       enum: ["pending", "posted", "in_transit", "delivered", "failed", "cancelled"],
@@ -40,7 +59,14 @@ const shippingSchema = new mongoose.Schema(
       index: true,
     },
     history: {
-      type: [mongoose.Schema.Types.Mixed],
+      type: [
+        {
+          timestamp: { type: Date, default: Date.now },
+          status: String,
+          description: String,
+          melhorEnvioStatus: String,
+        },
+      ],
       default: [],
     },
     dimensions: {
