@@ -1,6 +1,6 @@
 /**
  * Configuração da API MelhorEnvio
- * 
+ *
  * Docs: https://docs.melhorenvio.com.br/docs/
  */
 
@@ -19,7 +19,8 @@ const MELHOR_ENVIO_CONFIG = {
   oauth: {
     clientId: process.env.MELHOR_ENVIO_CLIENT_ID,
     clientSecret: process.env.MELHOR_ENVIO_CLIENT_SECRET,
-    redirectUri: process.env.MELHOR_ENVIO_REDIRECT_URI || "http://localhost:3980/api/webhooks/melhorenvio/auth/callback",
+    redirectUri:
+      process.env.MELHOR_ENVIO_REDIRECT_URI || "http://localhost:3980/api/webhooks/melhorenvio/auth/callback",
   },
 
   // Token JWT válido por 30 dias, precisa refresh token
@@ -68,7 +69,9 @@ const MELHOR_ENVIO_CONFIG = {
   // Configuração de webhook
   webhook: {
     // URL callback que o ME vai chamar
-    callbackUrl: process.env.MELHOR_ENVIO_WEBHOOK_URL || "http://localhost:3980/api/webhooks/melhorenvio/events",
+    callbackUrl:
+      process.env.MELHOR_ENVIO_WEBHOOK_URL ||
+      "https://90a9-2804-7f0-3c8-1a12-37c7-8978-8960-b19f.ngrok-free.app/api/webhooks/melhorenvio/events",
     // Secret compartilhado para validar HMAC-SHA256
     secret: process.env.MELHOR_ENVIO_WEBHOOK_SECRET,
     // Timeout para resposta: 6 segundos
@@ -113,7 +116,7 @@ const MELHOR_ENVIO_CONFIG = {
 if (!MELHOR_ENVIO_CONFIG.oauth.clientId || !MELHOR_ENVIO_CONFIG.oauth.clientSecret) {
   console.warn(
     "[MelhorEnvio] ⚠️ MELHOR_ENVIO_CLIENT_ID ou MELHOR_ENVIO_CLIENT_SECRET não configurados. " +
-    "Funcionalidade de shipping desabilitada até configurar."
+      "Funcionalidade de shipping desabilitada até configurar.",
   );
 }
 

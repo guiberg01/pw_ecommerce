@@ -15,6 +15,29 @@ import MELHOR_ENVIO_CONFIG from "../config/melhorenvio.config.js";
  */
 
 class ShippingService {
+  resolveFreightPolicy(subOrder) {
+    const coupon = subOrder?.coupon ?? null;
+    const code = String(coupon?.code ?? "").toUpperCase();
+
+    const explicitFreeShippingFlag =
+      coupon?.freeShipping === true
+      || coupon?.isFreeShipping === true
+      || coupon?.benefitType === "free_shipping"
+      || coupon?.type === "free_shipping";
+
+    const freeShippingCodePattern = /(FRETE\s*GRATIS|FRETEGRATIS|FREE\s*SHIPPING|SHIPFREE)/i;
+    const isFreeShippingByCode = freeShippingCodePattern.test(code);
+
+    const freeShipping = Boolean(coupon?.scope === "platform" && (explicitFreeShippingFlag || isFreeShippingByCode));
+
+    return {
+      // Regra de negócio: cliente paga frete por padrão.
+      // Exceção: frete grátis por promoção/cupom da plataforma.
+      whoPays: freeShipping ? "platform_paid" : "customer_pays",
+      freeShipping,
+    };
+  }
+
   /**
    * Obtém opções de frete para um subOrder
    * Chama MelhorEnvio API sempre para ter cotação fresca
@@ -103,15 +126,7 @@ class ShippingService {
     // Chamar API MelhorEnvio
     const result = await melhorenvioService.calculateShipping(store._id, payload);
 
-    // Determinar quem paga
-    let whoPays = "customer_pays";
-    let freeShipping = false;
-
-    // TODO: verificar se coupon tem frete grátis
-    if (subOrder.coupon?.scope === "platform" && subOrder.coupon.code?.includes("frete")) {
-      whoPays = "platform_paid";
-      freeShipping = true;
-    }
+    const { whoPays, freeShipping } = this.resolveFreightPolicy(subOrder);
 
     // Salvar cotação
     const quote = new ShippingQuote({
@@ -350,7 +365,7 @@ class ShippingService {
     });
 
     if (!shipping) {
-      console.warn(`[Shipping] Etiqueta ${melhorEnvioId} não encontrada no BD`);
+      console.warn(`[Shipping] etiqueta não encontrada para melhorEnvioOrderId=${melhorEnvioId}`);
       return null;
     }
 
@@ -359,10 +374,14 @@ class ShippingService {
 
     // Se já tem esse status, não update
     if (shipping.status === newStatus) {
+      console.info(
+        `[Shipping] webhook idempotente ignorado (melhorEnvioId=${melhorEnvioId}, status=${newStatus})`,
+      );
       return shipping;
     }
 
     // Update
+    const previousStatus = shipping.status;
     shipping.status = newStatus;
     shipping.history.push({
       timestamp: new Date(),
@@ -372,6 +391,9 @@ class ShippingService {
     });
 
     await shipping.save();
+    console.info(
+      `[Shipping] status atualizado (melhorEnvioId=${melhorEnvioId}, de=${previousStatus}, para=${newStatus})`,
+    );
 
     const subOrder = await SubOrder.findById(shipping.subOrder).select("_id order status");
     if (subOrder) {

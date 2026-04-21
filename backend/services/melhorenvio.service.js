@@ -23,7 +23,7 @@ class MelhorEnvioService {
       timeout: MELHOR_ENVIO_CONFIG.httpClient.timeout,
       headers: {
         "Content-Type": "application/json",
-        "Accept": "application/json",
+        Accept: "application/json",
       },
     };
 
@@ -32,6 +32,44 @@ class MelhorEnvioService {
     }
 
     return axios.create(config);
+  }
+
+  isRetryableError(error) {
+    const status = Number(error?.response?.status ?? 0);
+    const networkCode = String(error?.code ?? "").toUpperCase();
+
+    if ([408, 409, 425, 429, 500, 502, 503, 504].includes(status)) {
+      return true;
+    }
+
+    return ["ECONNRESET", "ECONNABORTED", "ETIMEDOUT", "ENOTFOUND", "EAI_AGAIN"].includes(networkCode);
+  }
+
+  async runWithRetry(actionName, fn) {
+    const maxRetries = Number(MELHOR_ENVIO_CONFIG.httpClient.maxRetries ?? 0);
+    const retryDelay = Number(MELHOR_ENVIO_CONFIG.httpClient.retryDelay ?? 0);
+
+    let lastError = null;
+    for (let attempt = 0; attempt <= maxRetries; attempt += 1) {
+      try {
+        return await fn();
+      } catch (error) {
+        lastError = error;
+        const retryable = this.isRetryableError(error);
+        if (!retryable || attempt === maxRetries) {
+          break;
+        }
+
+        console.warn(
+          `[MelhorEnvio] tentativa ${attempt + 1}/${maxRetries + 1} falhou em ${actionName}; tentando novamente...`,
+        );
+        await new Promise((resolve) => {
+          setTimeout(resolve, retryDelay * (attempt + 1));
+        });
+      }
+    }
+
+    throw lastError;
   }
 
   /**
@@ -145,9 +183,8 @@ class MelhorEnvioService {
     const axiosInstance = this.createAxiosInstance(token);
 
     try {
-      const response = await axiosInstance.post(
-        MELHOR_ENVIO_CONFIG.endpoints.calculateShipping,
-        payload,
+      const response = await this.runWithRetry("calculateShipping", () =>
+        axiosInstance.post(MELHOR_ENVIO_CONFIG.endpoints.calculateShipping, payload),
       );
 
       return {
@@ -172,9 +209,8 @@ class MelhorEnvioService {
     const axiosInstance = this.createAxiosInstance(token);
 
     try {
-      const response = await axiosInstance.post(
-        MELHOR_ENVIO_CONFIG.endpoints.createShippingLabel,
-        payload,
+      const response = await this.runWithRetry("createShippingLabel", () =>
+        axiosInstance.post(MELHOR_ENVIO_CONFIG.endpoints.createShippingLabel, payload),
       );
 
       return {
@@ -204,7 +240,7 @@ class MelhorEnvioService {
 
     try {
       const endpoint = MELHOR_ENVIO_CONFIG.endpoints.getShippingLabel.replace(":id", melhorEnvioId);
-      const response = await axiosInstance.get(endpoint);
+      const response = await this.runWithRetry("getShippingLabel", () => axiosInstance.get(endpoint));
 
       return response.data;
     } catch (error) {
@@ -226,9 +262,11 @@ class MelhorEnvioService {
 
     try {
       const endpoint = MELHOR_ENVIO_CONFIG.endpoints.getPrintLabel.replace(":id", melhorEnvioId);
-      const response = await axiosInstance.get(endpoint, {
-        params: { format }, // url, pdf, etc
-      });
+      const response = await this.runWithRetry("getPrintLabel", () =>
+        axiosInstance.get(endpoint, {
+          params: { format }, // url, pdf, etc
+        }),
+      );
 
       return response.data;
     } catch (error) {
@@ -250,7 +288,7 @@ class MelhorEnvioService {
 
     try {
       const endpoint = MELHOR_ENVIO_CONFIG.endpoints.createShippingLabel + `/${melhorEnvioId}`;
-      await axiosInstance.delete(endpoint);
+      await this.runWithRetry("cancelLabel", () => axiosInstance.delete(endpoint));
 
       return {
         success: true,
@@ -275,11 +313,13 @@ class MelhorEnvioService {
     const axiosInstance = this.createAxiosInstance(token);
 
     try {
-      const response = await axiosInstance.get(MELHOR_ENVIO_CONFIG.endpoints.trackShipment, {
-        params: {
-          orders: melhorEnvioIds.join(","),
-        },
-      });
+      const response = await this.runWithRetry("trackShipments", () =>
+        axiosInstance.get(MELHOR_ENVIO_CONFIG.endpoints.trackShipment, {
+          params: {
+            orders: melhorEnvioIds.join(","),
+          },
+        }),
+      );
 
       return response.data;
     } catch (error) {
@@ -300,7 +340,9 @@ class MelhorEnvioService {
     const axiosInstance = this.createAxiosInstance(token);
 
     try {
-      const response = await axiosInstance.get(MELHOR_ENVIO_CONFIG.endpoints.getCarriers);
+      const response = await this.runWithRetry("getCarriers", () =>
+        axiosInstance.get(MELHOR_ENVIO_CONFIG.endpoints.getCarriers),
+      );
 
       return response.data;
     } catch (error) {

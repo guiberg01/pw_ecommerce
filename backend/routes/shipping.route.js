@@ -23,6 +23,13 @@ const router = express.Router();
 /**
  * Rota pública para webhooks (sem autenticação)
  */
+router.get("/melhorenvio/events", (req, res) => {
+  return res.status(200).json({
+    success: true,
+    message: "Webhook endpoint disponível",
+  });
+});
+
 router.post(
   "/melhorenvio/events",
   webhookAuthMiddleware,

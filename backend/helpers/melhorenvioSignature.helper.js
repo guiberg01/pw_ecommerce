@@ -48,22 +48,37 @@ export const verifyMelhorEnvioSignature = (req) => {
  */
 export const webhookAuthMiddleware = (req, res, next) => {
   try {
+    const signature = req.headers["x-me-signature"];
+
+    // Alguns provedores validam URL de webhook com ping sem assinatura.
+    // Nesse caso retornamos 200, mas não processamos evento.
+    if (!signature) {
+      return res.status(200).json({
+        success: true,
+        message: "Webhook endpoint disponível",
+        skipped: true,
+      });
+    }
+
     const isValid = verifyMelhorEnvioSignature(req);
 
     if (!isValid) {
-      return res.status(401).json({
+      return res.status(200).json({
         success: false,
+        skipped: true,
+        message: "Webhook recebido, mas assinatura inválida. Evento não processado.",
         errorCode: "ME_SIGNATURE_INVALID",
-        message: "Assinatura do webhook inválida",
       });
     }
 
     next();
   } catch (error) {
-    return res.status(500).json({
+    const status = error.errorCode === "ME_SECRET_NOT_CONFIGURED" ? 200 : 200;
+    return res.status(status).json({
       success: false,
+      skipped: true,
       errorCode: error.errorCode || "WEBHOOK_AUTH_ERROR",
-      message: error.message,
+      message: error.message || "Webhook recebido, mas não processado.",
     });
   }
 };
