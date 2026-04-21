@@ -1,4 +1,17 @@
 import mongoose from "mongoose";
+import crypto from "crypto";
+
+const TICKET_CHANNELS = ["direct_message", "platform_support"];
+const TICKET_STATUSES = [
+  "open",
+  "triage",
+  "in_progress",
+  "waiting_requester",
+  "waiting_internal",
+  "resolved",
+  "reopened",
+  "closed",
+];
 
 const ticketMessageSchema = new mongoose.Schema(
   {
@@ -43,10 +56,46 @@ const ticketMessageSchema = new mongoose.Schema(
 
 const ticketSchema = new mongoose.Schema(
   {
+    channel: {
+      type: String,
+      enum: TICKET_CHANNELS,
+      default: "direct_message",
+      index: true,
+    },
+    ticketNumber: {
+      type: String,
+      default: null,
+      trim: true,
+      index: true,
+    },
     user: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "User",
       required: true,
+      index: true,
+    },
+    requester: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "User",
+      default: null,
+      index: true,
+    },
+    requesterType: {
+      type: String,
+      enum: ["customer", "seller", "admin"],
+      default: null,
+      index: true,
+    },
+    assignedTo: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "User",
+      default: null,
+      index: true,
+    },
+    category: {
+      type: String,
+      enum: ["technical", "order", "store", "refund", "delivery", "payment", "account", "other"],
+      default: null,
       index: true,
     },
     store: {
@@ -79,7 +128,7 @@ const ticketSchema = new mongoose.Schema(
     },
     status: {
       type: String,
-      enum: ["open", "in_progress", "resolved", "closed"],
+      enum: TICKET_STATUSES,
       default: "open",
       index: true,
     },
@@ -117,6 +166,29 @@ const ticketSchema = new mongoose.Schema(
       default: 0,
       min: 0,
     },
+    unreadCountRequester: {
+      type: Number,
+      default: 0,
+      min: 0,
+    },
+    unreadCountPlatform: {
+      type: Number,
+      default: 0,
+      min: 0,
+    },
+    resolutionSummary: {
+      type: String,
+      default: null,
+      trim: true,
+    },
+    resolvedAt: {
+      type: Date,
+      default: null,
+    },
+    closedAt: {
+      type: Date,
+      default: null,
+    },
     messages: {
       type: [ticketMessageSchema],
       default: [],
@@ -125,9 +197,43 @@ const ticketSchema = new mongoose.Schema(
   { timestamps: true },
 );
 
-ticketSchema.index({ user: 1, store: 1 }, { unique: true, partialFilterExpression: { store: { $ne: null } } });
+ticketSchema.pre("validate", function () {
+  if (this.channel === "platform_support") {
+    if (!this.requester) {
+      this.requester = this.user;
+    }
+
+    if (!this.ticketNumber) {
+      const year = new Date().getFullYear();
+      const suffix = crypto.randomInt(0, 1_000_000).toString().padStart(6, "0");
+      this.ticketNumber = `TK-${year}-${suffix}`;
+    }
+  }
+});
+
+ticketSchema.index(
+  { channel: 1, user: 1, store: 1 },
+  {
+    unique: true,
+    partialFilterExpression: {
+      channel: "direct_message",
+      store: { $ne: null },
+    },
+  },
+);
+ticketSchema.index(
+  { channel: 1, ticketNumber: 1 },
+  {
+    unique: true,
+    partialFilterExpression: {
+      channel: "platform_support",
+      ticketNumber: { $type: "string" },
+    },
+  },
+);
 ticketSchema.index({ store: 1, updatedAt: -1 });
 ticketSchema.index({ user: 1, updatedAt: -1 });
+ticketSchema.index({ channel: 1, requester: 1, updatedAt: -1 });
 
 const Ticket = mongoose.model("Ticket", ticketSchema);
 

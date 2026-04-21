@@ -5,6 +5,8 @@ import { createHttpError } from "../helpers/httpError.js";
 import { redis } from "../config/redis.js";
 import { createNotificationForUser } from "./notification.service.js";
 
+const DIRECT_MESSAGE_CHANNEL = "direct_message";
+
 const DEFAULT_PAGE = 1;
 const DEFAULT_LIMIT = 20;
 const MAX_LIMIT = 100;
@@ -205,6 +207,7 @@ const buildConversationSummary = (conversation) => {
 
   return {
     _id: conversation._id,
+    channel: conversation.channel,
     user: conversation.user,
     store: conversation.store,
     subject: conversation.subject,
@@ -301,13 +304,13 @@ const applyUnreadCounterOnSend = (conversation, senderRole) => {
 export const listConversationsForActor = async (actor, query = {}) => {
   const { page, limit, skip } = normalizePagination(query);
 
-  let filters = {};
+  let filters = { channel: DIRECT_MESSAGE_CHANNEL };
 
   if (actor.role === "customer") {
-    filters = { user: actor._id };
+    filters = { channel: DIRECT_MESSAGE_CHANNEL, user: actor._id };
   } else if (actor.role === "seller") {
     const ownedStoreIds = await Store.find({ owner: actor._id, status: { $ne: "deleted" } }).distinct("_id");
-    filters = { store: { $in: ownedStoreIds } };
+    filters = { channel: DIRECT_MESSAGE_CHANNEL, store: { $in: ownedStoreIds } };
   }
 
   const [items, total] = await Promise.all([
@@ -332,13 +335,13 @@ export const listAllConversationsForAdmin = async (query = {}) => {
   const { page, limit, skip } = normalizePagination(query);
 
   const [items, total] = await Promise.all([
-    Ticket.find({})
+    Ticket.find({ channel: DIRECT_MESSAGE_CHANNEL })
       .sort({ lastMessageAt: -1, updatedAt: -1 })
       .skip(skip)
       .limit(limit)
       .populate("user", "name email")
       .populate("store", "name owner"),
-    Ticket.countDocuments({}),
+    Ticket.countDocuments({ channel: DIRECT_MESSAGE_CHANNEL }),
   ]);
 
   return buildPaginationResult({
@@ -350,7 +353,7 @@ export const listAllConversationsForAdmin = async (query = {}) => {
 };
 
 export const getConversationMessagesForActor = async (actor, conversationId) => {
-  const conversation = await Ticket.findById(conversationId)
+  const conversation = await Ticket.findOne({ _id: conversationId, channel: DIRECT_MESSAGE_CHANNEL })
     .populate("user", "name email")
     .populate("store", "name owner");
 
@@ -386,10 +389,11 @@ export const startConversationForStore = async (actor, storeId, payload) => {
 
   const senderRole = getSenderRole(actor);
 
-  let conversation = await Ticket.findOne({ user: actor._id, store: store._id });
+  let conversation = await Ticket.findOne({ user: actor._id, store: store._id, channel: DIRECT_MESSAGE_CHANNEL });
 
   if (!conversation) {
     conversation = new Ticket({
+      channel: DIRECT_MESSAGE_CHANNEL,
       user: actor._id,
       store: store._id,
       subject: payload.subject ? String(payload.subject).trim() : `Conversa com ${store.name}`,
@@ -438,7 +442,10 @@ export const sendMessageToConversation = async (actor, conversationId, payload) 
   const { text, attachments } = assertMessagePayloadOrThrow(payload);
   assertNoInappropriateContentOrThrow(text);
 
-  const conversation = await Ticket.findById(conversationId).populate("store", "owner name");
+  const conversation = await Ticket.findOne({ _id: conversationId, channel: DIRECT_MESSAGE_CHANNEL }).populate(
+    "store",
+    "owner name",
+  );
 
   if (!conversation) {
     throw createHttpError("Conversa não encontrada", 404, undefined, "MESSAGE_CONVERSATION_NOT_FOUND");
@@ -487,7 +494,7 @@ export const sendMessageToConversation = async (actor, conversationId, payload) 
 };
 
 export const markConversationAsReadForActor = async (actor, conversationId) => {
-  const conversation = await Ticket.findById(conversationId);
+  const conversation = await Ticket.findOne({ _id: conversationId, channel: DIRECT_MESSAGE_CHANNEL });
 
   if (!conversation) {
     throw createHttpError("Conversa não encontrada", 404, undefined, "MESSAGE_CONVERSATION_NOT_FOUND");
@@ -500,7 +507,7 @@ export const markConversationAsReadForActor = async (actor, conversationId) => {
 };
 
 export const blockConversationForActor = async (actor, conversationId) => {
-  const conversation = await Ticket.findById(conversationId);
+  const conversation = await Ticket.findOne({ _id: conversationId, channel: DIRECT_MESSAGE_CHANNEL });
 
   if (!conversation) {
     throw createHttpError("Conversa não encontrada", 404, undefined, "MESSAGE_CONVERSATION_NOT_FOUND");
@@ -520,7 +527,7 @@ export const blockConversationForActor = async (actor, conversationId) => {
 };
 
 export const unblockConversationForActor = async (actor, conversationId) => {
-  const conversation = await Ticket.findById(conversationId);
+  const conversation = await Ticket.findOne({ _id: conversationId, channel: DIRECT_MESSAGE_CHANNEL });
 
   if (!conversation) {
     throw createHttpError("Conversa não encontrada", 404, undefined, "MESSAGE_CONVERSATION_NOT_FOUND");
