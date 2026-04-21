@@ -7,10 +7,7 @@ import { body, param, query, validationResult } from "express-validator";
 // Validador para calcular frete
 export const calculateShippingSchema = [
   param("subOrderId").isMongoId().withMessage("subOrderId inválido"),
-  query("forceRecalculate")
-    .optional()
-    .isBoolean()
-    .withMessage("forceRecalculate deve ser boolean"),
+  query("forceRecalculate").optional().isBoolean().withMessage("forceRecalculate deve ser boolean"),
 ];
 
 // Validador para selecionar transportadora
@@ -21,9 +18,7 @@ export const selectShippingSchema = [
 ];
 
 // Validador para gerar etiqueta
-export const generateLabelSchema = [
-  param("subOrderId").isMongoId().withMessage("subOrderId inválido"),
-];
+export const generateLabelSchema = [param("subOrderId").isMongoId().withMessage("subOrderId inválido")];
 
 // Validador para callback de webhook
 export const webhookSchema = [
