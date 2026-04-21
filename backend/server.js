@@ -20,6 +20,7 @@ import checkoutRoutes from "./routes/checkout.route.js";
 import uploadRoutes from "./routes/upload.route.js";
 import orderRoutes from "./routes/order.route.js";
 import shippingRoutes from "./routes/shipping.route.js";
+import reviewRoutes from "./routes/review.route.js";
 
 import { connectDB, disconnectDB } from "./config/db.js";
 import { disconnectRedis } from "./config/redis.js";
@@ -87,10 +88,10 @@ const isRawBodyWebhookRequest = (req) => {
   const url = String(req.url ?? "");
 
   return (
-    originalUrl.startsWith("/api/checkout/webhook/stripe")
-    || url.startsWith("/api/checkout/webhook/stripe")
-    || originalUrl.startsWith("/api/webhooks/melhorenvio/events")
-    || url.startsWith("/api/webhooks/melhorenvio/events")
+    originalUrl.startsWith("/api/checkout/webhook/stripe") ||
+    url.startsWith("/api/checkout/webhook/stripe") ||
+    originalUrl.startsWith("/api/webhooks/melhorenvio/events") ||
+    url.startsWith("/api/webhooks/melhorenvio/events")
   );
 };
 
@@ -120,6 +121,7 @@ app.use("/api/checkout", checkoutRoutes);
 app.use("/api/uploads", uploadRoutes);
 app.use("/api/orders", orderRoutes);
 app.use("/api/shipping", shippingRoutes);
+app.use("/api/reviews", reviewRoutes);
 app.use("/api/stores/me", shippingRoutes);
 app.use("/api/webhooks", shippingRoutes);
 
