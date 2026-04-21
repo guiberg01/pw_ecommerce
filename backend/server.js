@@ -19,6 +19,7 @@ import couponRoutes from "./routes/coupon.route.js";
 import checkoutRoutes from "./routes/checkout.route.js";
 import uploadRoutes from "./routes/upload.route.js";
 import orderRoutes from "./routes/order.route.js";
+import shippingRoutes from "./routes/shipping.route.js";
 
 import { connectDB, disconnectDB } from "./config/db.js";
 import { disconnectRedis } from "./config/redis.js";
@@ -113,6 +114,9 @@ app.use("/api/coupons", couponRoutes);
 app.use("/api/checkout", checkoutRoutes);
 app.use("/api/uploads", uploadRoutes);
 app.use("/api/orders", orderRoutes);
+app.use("/api/shipping", shippingRoutes);
+app.use("/api/stores/me", shippingRoutes);
+app.use("/api/webhooks", shippingRoutes);
 
 app.use((req, res, next) => {
   next(createHttpError("Rota não encontrada", 404, undefined, "ROUTE_NOT_FOUND"));
