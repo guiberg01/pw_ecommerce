@@ -5,6 +5,7 @@ import SubOrder from "../models/subOrder.model.js";
 import Order from "../models/order.model.js";
 import { createHttpError } from "../helpers/httpError.js";
 import { findActiveStoreByOwnerOrThrow } from "./catalog.service.js";
+import { notifyReviewCreatedForSeller, notifyReviewReplyForCustomer } from "./notification.service.js";
 
 const DEFAULT_PAGE = 1;
 const DEFAULT_LIMIT = 20;
@@ -253,7 +254,15 @@ export const createReviewForUser = async (actor, payload) => {
       createdReview = review;
     });
 
-    return serializeReview(createdReview.toObject());
+    const serialized = serializeReview(createdReview.toObject());
+
+    await notifyReviewCreatedForSeller({
+      productId: payload.productId,
+      reviewId: serialized._id,
+      rating: serialized.rating,
+    });
+
+    return serialized;
   } finally {
     await session.endSession();
   }
@@ -346,6 +355,12 @@ export const upsertReviewReply = async (actor, reviewId, comment) => {
   };
 
   await review.save();
+  await notifyReviewReplyForCustomer({
+    userId: review.user,
+    reviewId: review._id,
+    productId: review.product,
+  });
+
   return serializeReview(review.toObject());
 };
 

@@ -5,6 +5,7 @@ import Shipping from "../models/shipping.model.js";
 import { createHttpError } from "../helpers/httpError.js";
 import { findActiveStoreByOwnerOrThrow } from "./catalog.service.js";
 import { findSellerOrderByIdOrThrow } from "./storeOrder.service.js";
+import { notifyOrderStatusForCustomer } from "./notification.service.js";
 
 const SELLER_STATUS_FLOW = {
   pending: [],
@@ -112,6 +113,7 @@ const syncParentOrderStatusFromSubOrders = async ({ orderId, session }) => {
 export const updateSellerOrderStatus = async (ownerId, orderId, { status }) => {
   const store = await findActiveStoreByOwnerOrThrow(ownerId);
   const session = await mongoose.startSession();
+  let targetOrderUserId = null;
 
   try {
     await session.withTransaction(async () => {
@@ -120,6 +122,9 @@ export const updateSellerOrderStatus = async (ownerId, orderId, { status }) => {
       if (!subOrder) {
         throw createHttpError("Pedido não encontrado", 404, undefined, "SELLER_ORDER_NOT_FOUND");
       }
+
+      const order = await Order.findById(orderId).select("_id user").session(session).lean();
+      targetOrderUserId = order?.user ?? null;
 
       await ensureValidSellerStatusTransitionOrThrow(subOrder.status, status, subOrder._id);
 
@@ -146,6 +151,14 @@ export const updateSellerOrderStatus = async (ownerId, orderId, { status }) => {
     });
   } finally {
     await session.endSession();
+  }
+
+  if (targetOrderUserId) {
+    await notifyOrderStatusForCustomer({
+      orderId,
+      userId: targetOrderUserId,
+      status,
+    });
   }
 
   return findSellerOrderByIdOrThrow(ownerId, orderId);

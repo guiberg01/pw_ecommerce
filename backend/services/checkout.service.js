@@ -12,6 +12,11 @@ import CouponUsage from "../models/couponUsage.model.js";
 import Payout from "../models/payout.model.js";
 import Store from "../models/store.model.js";
 import { createHttpError } from "../helpers/httpError.js";
+import {
+  notifyOrderFailedOrCancelled,
+  notifyOrderPaid,
+  notifyRefundEvent,
+} from "./notification.service.js";
 
 const roundMoney = (value) => Math.round((Number(value) + Number.EPSILON) * 100) / 100;
 const CHECKOUT_EVENT_SOURCE = "stripe_webhook";
@@ -661,6 +666,7 @@ export const createCheckoutIntentForUser = async (userId, payload) => {
 
 const markPaymentAsFailedByIntentId = async ({ stripePaymentIntentId, stripeEventId, eventType, metadata = {} }) => {
   const session = await mongoose.startSession();
+  let failedOrderId = null;
 
   try {
     await session.withTransaction(async () => {
@@ -694,8 +700,14 @@ const markPaymentAsFailedByIntentId = async ({ stripePaymentIntentId, stripeEven
           { $set: { status: "failed" } },
           { session },
         );
+
+        failedOrderId = payment.order;
       }
     });
+
+    if (failedOrderId) {
+      await notifyOrderFailedOrCancelled({ orderId: failedOrderId });
+    }
   } finally {
     await session.endSession();
   }
@@ -809,6 +821,7 @@ const markPaymentAsSucceededByIntentId = async ({ stripePaymentIntent, stripeEve
   const session = await mongoose.startSession();
   let orderIdForPayout = null;
   let paymentIdForPayout = null;
+  let orderIdForNotification = null;
 
   try {
     await session.withTransaction(async () => {
@@ -966,6 +979,7 @@ const markPaymentAsSucceededByIntentId = async ({ stripePaymentIntent, stripeEve
 
       orderIdForPayout = order._id;
       paymentIdForPayout = payment._id;
+      orderIdForNotification = order._id;
 
       payment.status = "succeeded";
       payment.paidAt = new Date();
@@ -992,6 +1006,64 @@ const markPaymentAsSucceededByIntentId = async ({ stripePaymentIntent, stripeEve
         orderId: orderIdForPayout,
         paymentId: paymentIdForPayout,
       });
+    }
+
+    if (orderIdForNotification) {
+      await notifyOrderPaid(orderIdForNotification);
+    }
+  } finally {
+    await session.endSession();
+  }
+};
+
+const markPaymentAsRefundedByChargeId = async ({ stripeChargeId, amountRefundedInCents, stripeEventId }) => {
+  const session = await mongoose.startSession();
+  let notificationPayload = null;
+
+  try {
+    await session.withTransaction(async () => {
+      const payment = await Payment.findOne({ stripeChargeId }).session(session);
+      if (!payment) return;
+
+      if (isEventAlreadyProcessed(payment, stripeEventId)) return;
+
+      const refundedAmount = Number(amountRefundedInCents ?? 0) / 100;
+      const totalAmount = Number(payment.amount ?? 0);
+      const isTotalRefund = refundedAmount >= totalAmount;
+
+      payment.refundedAmount = refundedAmount;
+      payment.status = isTotalRefund ? "refunded" : "partially_refunded";
+
+      appendPaymentEvent({
+        payment,
+        stripeEventId,
+        type: "charge.refunded",
+        metadata: { refundedAmount },
+      });
+
+      await payment.save({ session });
+
+      const [order, subOrders] = await Promise.all([
+        Order.findById(payment.order).select("_id user").session(session).lean(),
+        SubOrder.find({ order: payment.order }).select("store").session(session).lean(),
+      ]);
+
+      if (!order) return;
+
+      const stores = await Store.find({ _id: { $in: subOrders.map((subOrder) => subOrder.store) } })
+        .select("owner")
+        .session(session)
+        .lean();
+
+      notificationPayload = {
+        orderId: order._id,
+        userId: order.user,
+        sellerIds: stores.map((store) => store.owner),
+      };
+    });
+
+    if (notificationPayload) {
+      await notifyRefundEvent(notificationPayload);
     }
   } finally {
     await session.endSession();
@@ -1057,6 +1129,14 @@ export const processStripeWebhookEvent = async ({ payloadBuffer, signature }) =>
         metadata: {
           lastPaymentErrorCode: event.data.object.last_payment_error?.code ?? null,
         },
+      });
+      break;
+    }
+    case "charge.refunded": {
+      await markPaymentAsRefundedByChargeId({
+        stripeChargeId: event.data.object.id,
+        amountRefundedInCents: event.data.object.amount_refunded,
+        stripeEventId: event.id,
       });
       break;
     }

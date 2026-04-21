@@ -1,6 +1,7 @@
 import Coupon from "../models/coupon.model.js";
 import { createHttpError } from "../helpers/httpError.js";
 import { isDuplicateFieldError } from "../helpers/slugUnique.helper.js";
+import { notifyNewCouponForCustomers } from "./notification.service.js";
 
 const activeCouponStatuses = ["active", "sold-out"];
 const DEFAULT_PAGE = 1;
@@ -96,6 +97,9 @@ export const createCoupons = async (idUser, data) => {
   try {
     const coupon = new Coupon({ ...data, createdBy: idUser });
     await coupon.save();
+
+    await notifyNewCouponForCustomers(coupon);
+
     return coupon;
   } catch (error) {
     if (isDuplicateFieldError(error, "code")) {

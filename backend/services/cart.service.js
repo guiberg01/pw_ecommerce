@@ -12,6 +12,7 @@ import {
   writeGuestCart,
 } from "../helpers/cart.helper.js";
 import { createHttpError } from "../helpers/httpError.js";
+import { notifyCartReminderForUser } from "./notification.service.js";
 
 const MAX_VERSION_RETRIES = 3;
 const MAX_AUDIT_EVENTS = 50;
@@ -101,7 +102,7 @@ export const addProductToCartForRequest = async (req, res, productId, quantity =
     throw createHttpError("Produto sem estoque disponível", 400, undefined, "CART_OUT_OF_STOCK");
   }
 
-  return mutateCartForRequest(req, res, (items) => {
+  const result = await mutateCartForRequest(req, res, (items) => {
     const currentQuantity = getItemQuantityInCart(items, productVariant._id);
     const maxAllowed = getMaxQuantityPerPerson(productVariant);
     const finalQuantity = currentQuantity + Number(quantity);
@@ -118,6 +119,12 @@ export const addProductToCartForRequest = async (req, res, productId, quantity =
 
     return upsertCartItem(items, productVariant._id, quantity, { increment: true });
   });
+
+  if (isAuthenticated(req)) {
+    await notifyCartReminderForUser(req.user._id, { itemCount: result.itemCount });
+  }
+
+  return result;
 };
 
 export const updateProductQuantityForRequest = async (req, res, productId, quantity) => {
