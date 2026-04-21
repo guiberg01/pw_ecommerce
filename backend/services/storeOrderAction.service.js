@@ -1,10 +1,12 @@
+import mongoose from "mongoose";
+import Order from "../models/order.model.js";
 import SubOrder from "../models/subOrder.model.js";
 import { createHttpError } from "../helpers/httpError.js";
 import { findActiveStoreByOwnerOrThrow } from "./catalog.service.js";
 import { findSellerOrderByIdOrThrow } from "./storeOrder.service.js";
 
 const SELLER_STATUS_FLOW = {
-  pending: ["processing"],
+  pending: [],
   paid: ["processing"],
   processing: ["shipping"],
   shipping: ["delivered"],
@@ -13,7 +15,18 @@ const SELLER_STATUS_FLOW = {
   failed: [],
 };
 
+const ORDER_PAID_LIKE_STATUSES = new Set(["paid", "processing", "shipping", "delivered"]);
+
 const ensureValidSellerStatusTransitionOrThrow = (currentStatus, nextStatus) => {
+  if (currentStatus === "pending") {
+    throw createHttpError(
+      "O pagamento ainda não foi confirmado para iniciar a operação do pedido",
+      409,
+      { currentStatus, requestedStatus: nextStatus },
+      "SELLER_SUBORDER_PAYMENT_NOT_CONFIRMED",
+    );
+  }
+
   if (currentStatus === nextStatus) {
     throw createHttpError(
       "O pedido já está neste status",
@@ -35,24 +48,87 @@ const ensureValidSellerStatusTransitionOrThrow = (currentStatus, nextStatus) => 
   }
 };
 
-export const updateSellerOrderStatus = async (ownerId, orderId, { status }) => {
-  const store = await findActiveStoreByOwnerOrThrow(ownerId);
-  const subOrder = await SubOrder.findOne({ order: orderId, store: store._id }).select("_id status").lean();
-
-  if (!subOrder) {
-    throw createHttpError("Pedido não encontrado", 404, undefined, "SELLER_ORDER_NOT_FOUND");
+const deriveOrderStatusFromSubOrders = (subOrderStatuses = []) => {
+  if (subOrderStatuses.length === 0) {
+    return null;
   }
 
-  ensureValidSellerStatusTransitionOrThrow(subOrder.status, status);
+  if (subOrderStatuses.every((status) => status === "cancelled")) {
+    return "cancelled";
+  }
 
-  await SubOrder.updateOne(
-    { _id: subOrder._id },
+  if (subOrderStatuses.every((status) => status === "failed")) {
+    return "failed";
+  }
+
+  if (subOrderStatuses.some((status) => ORDER_PAID_LIKE_STATUSES.has(status))) {
+    return "paid";
+  }
+
+  if (subOrderStatuses.every((status) => status === "pending")) {
+    return "pending";
+  }
+
+  return null;
+};
+
+const syncParentOrderStatusFromSubOrders = async ({ orderId, session }) => {
+  const subOrders = await SubOrder.find({ order: orderId }).select("status").session(session).lean();
+  const nextOrderStatus = deriveOrderStatusFromSubOrders(subOrders.map((subOrder) => subOrder.status));
+
+  if (!nextOrderStatus) {
+    return;
+  }
+
+  await Order.updateOne(
+    { _id: orderId, status: { $ne: nextOrderStatus } },
     {
       $set: {
-        status,
+        status: nextOrderStatus,
       },
     },
+    { session },
   );
+};
+
+export const updateSellerOrderStatus = async (ownerId, orderId, { status }) => {
+  const store = await findActiveStoreByOwnerOrThrow(ownerId);
+  const session = await mongoose.startSession();
+
+  try {
+    await session.withTransaction(async () => {
+      const subOrder = await SubOrder.findOne({ order: orderId, store: store._id }).select("_id status").session(session).lean();
+
+      if (!subOrder) {
+        throw createHttpError("Pedido não encontrado", 404, undefined, "SELLER_ORDER_NOT_FOUND");
+      }
+
+      ensureValidSellerStatusTransitionOrThrow(subOrder.status, status);
+
+      const updatedSubOrder = await SubOrder.updateOne(
+        { _id: subOrder._id, status: subOrder.status },
+        {
+          $set: {
+            status,
+          },
+        },
+        { session },
+      );
+
+      if (updatedSubOrder.matchedCount === 0) {
+        throw createHttpError(
+          "Conflito de atualização. Tente novamente.",
+          409,
+          { orderId, subOrderId: subOrder._id },
+          "SELLER_SUBORDER_CONCURRENT_UPDATE_CONFLICT",
+        );
+      }
+
+      await syncParentOrderStatusFromSubOrders({ orderId, session });
+    });
+  } finally {
+    await session.endSession();
+  }
 
   return findSellerOrderByIdOrThrow(ownerId, orderId);
 };
