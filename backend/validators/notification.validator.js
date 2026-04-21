@@ -22,6 +22,7 @@ export const notificationListQuerySchema = paginationQuerySchema.extend({
       "product_discount",
       "promotion",
       "cart_reminder",
+      "chat_message",
       "admin_announcement",
     ])
     .optional(),
@@ -47,6 +48,7 @@ export const adminBroadcastNotificationSchema = z.object({
       "store_visits",
       "coupon_expiring",
       "cart_reminder",
+      "chat_message",
     ])
     .optional()
     .default("admin_announcement"),
