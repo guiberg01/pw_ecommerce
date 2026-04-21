@@ -25,11 +25,15 @@ export const verifyMelhorEnvioSignature = (req) => {
     };
   }
 
-  const body = JSON.stringify(req.body);
+  const body = req.rawBody ? req.rawBody.toString("utf8") : JSON.stringify(req.body);
   const expectedSignature = crypto
     .createHmac("sha256", MELHOR_ENVIO_CONFIG.webhook.secret)
     .update(body)
     .digest("base64");
+
+  if (signature.length !== expectedSignature.length) {
+    return false;
+  }
 
   const isValid = crypto.timingSafeEqual(
     Buffer.from(signature),

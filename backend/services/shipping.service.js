@@ -1,9 +1,7 @@
-import mongoose from "mongoose";
 import Order from "../models/order.model.js";
 import SubOrder from "../models/subOrder.model.js";
 import Shipping from "../models/shipping.model.js";
 import ShippingQuote from "../models/shippingQuote.model.js";
-import Store from "../models/store.model.js";
 import melhorenvioService from "./melhorenvio.service.js";
 import MELHOR_ENVIO_CONFIG from "../config/melhorenvio.config.js";
 
@@ -24,7 +22,7 @@ class ShippingService {
   async getShippingOptions(subOrderId, forceRecalculate = false) {
     const subOrder = await SubOrder.findById(subOrderId)
       .populate("order")
-      .populate("store")
+      .populate({ path: "store", populate: { path: "address" } })
       .populate("items.productVariantId");
 
     if (!subOrder) {
@@ -64,6 +62,7 @@ class ShippingService {
           packages: existingQuote.packages,
           whoPays: existingQuote.whoPays,
           freeShipping: existingQuote.freeShipping,
+          quoteId: existingQuote._id,
           cachedAt: existingQuote.createdAt,
         };
       }
@@ -120,13 +119,13 @@ class ShippingService {
       subOrder: subOrderId,
       store: store._id,
       quotaData: result,
-      carriers: result.carriers.map((c) => ({
+      carriers: (Array.isArray(result.carriers) ? result.carriers : []).map((c) => ({
         id: c.id,
         name: c.name,
-        price: c.price,
-        customPrice: c.custom_price,
-        deliveryTime: c.delivery_time,
-        customDeliveryTime: c.custom_delivery_time,
+        price: Number(c.price ?? 0),
+        customPrice: Number(c.custom_price ?? c.price ?? 0),
+        deliveryTime: Number(c.delivery_time ?? 0),
+        customDeliveryTime: Number(c.custom_delivery_time ?? c.delivery_time ?? 0),
       })),
       packages: result.packages || [],
       whoPays,
@@ -167,7 +166,7 @@ class ShippingService {
     }
 
     // Validar que carrier é válido
-    const selectedCarrier = quote.carriers.find((c) => c.id === carrierId);
+    const selectedCarrier = quote.carriers.find((c) => String(c.id) === String(carrierId));
     if (!selectedCarrier) {
       throw {
         errorCode: "INVALID_CARRIER",
@@ -211,8 +210,11 @@ class ShippingService {
    */
   async generateLabel(subOrderId) {
     const subOrder = await SubOrder.findById(subOrderId)
-      .populate("order")
-      .populate("store")
+      .populate({ path: "order", populate: { path: "user", select: "email" } })
+      .populate({
+        path: "store",
+        populate: [{ path: "address" }, { path: "owner", select: "email" }],
+      })
       .populate("shipping");
 
     if (!subOrder) {
@@ -255,9 +257,9 @@ class ShippingService {
       from: {
         name: store.name,
         phone: store.address.phoneNumber || "0000000000",
-        email: store.owner.email, // TODO: verificar se user tem email
+        email: store.owner?.email || null,
         document: store.cnpj || "", // IMPORTANTE para comercial
-        state_register: store.stateRegister || "",
+        state_register: "",
         document_type: "CNPJ",
         postal_code: store.address.zipCode.replace("-", ""),
         address: store.address.street,
@@ -270,7 +272,7 @@ class ShippingService {
       to: {
         name: order.shippingAddress.receiverName,
         phone: order.shippingAddress.phoneNumber,
-        email: order.user.email, // TODO
+        email: order.user?.email || null,
         document_type: "CPF",
         postal_code: order.shippingAddress.zipCode.replace("-", ""),
         address: order.shippingAddress.street,
@@ -371,7 +373,23 @@ class ShippingService {
 
     await shipping.save();
 
-    // TODO: Sincronizar com SubOrder e Order status
+    const subOrder = await SubOrder.findById(shipping.subOrder).select("_id order status");
+    if (subOrder) {
+      if (["posted", "in_transit"].includes(newStatus)) {
+        subOrder.status = "shipping";
+      }
+
+      if (newStatus === "delivered") {
+        subOrder.status = "delivered";
+      }
+
+      if (["failed", "cancelled"].includes(newStatus)) {
+        subOrder.status = "failed";
+      }
+
+      await subOrder.save();
+      await this.syncOrderStatus(subOrder.order);
+    }
 
     return shipping;
   }
@@ -387,25 +405,20 @@ class ShippingService {
       return;
     }
 
-    // Derivar status do Order baseado em SubOrders
+    // O Order pai aceita apenas: pending, paid, failed, cancelled
+    // Status operacionais de fulfillment permanecem representados em SubOrder/Shipping.
     const statuses = subOrders.map((s) => s.status);
 
     let orderStatus = "pending";
-    if (statuses.every((s) => s === "delivered")) {
-      orderStatus = "delivered";
-    } else if (statuses.some((s) => s === "failed" || s === "cancelled")) {
-      orderStatus = "failed"; // simplificado: se algum falhou, order falhou
-    } else if (statuses.some((s) => s === "shipping" || s === "in_transit")) {
-      orderStatus = "shipping";
-    } else if (statuses.every((s) => s !== "pending")) {
-      orderStatus = "processing";
+    if (statuses.every((s) => s === "cancelled")) {
+      orderStatus = "cancelled";
+    } else if (statuses.every((s) => s === "failed")) {
+      orderStatus = "failed";
+    } else if (statuses.some((s) => ["paid", "processing", "shipping", "delivered"].includes(s))) {
+      orderStatus = "paid";
     }
 
-    const order = await Order.findByIdAndUpdate(
-      orderId,
-      { status: orderStatus },
-      { new: true },
-    );
+    const order = await Order.findByIdAndUpdate(orderId, { status: orderStatus }, { new: true });
 
     return order;
   }
@@ -415,13 +428,15 @@ class ShippingService {
   mapCarrierName(meCarrierName) {
     const mapping = {
       SEDEX: "sedex",
+      Sedex: "sedex",
       PAC: "pac",
+      Pac: "pac",
       JADLOG: "jadlog",
       LOGGI: "loggi",
       "Azul Cargo": "azul",
       Correios: "correios",
     };
-    return mapping[meCarrierName] || "unknown";
+    return mapping[meCarrierName] || "correios";
   }
 
   getServiceId(carrierName) {

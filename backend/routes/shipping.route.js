@@ -15,7 +15,7 @@ import {
   oauthCallbackSchema,
   validateRequest,
 } from "../validators/shipping.validator.js";
-import { authenticate } from "../middleware/auth.middleware.js";
+import { isLoggedIn, isSeller } from "../middleware/auth.middleware.js";
 import { webhookAuthMiddleware } from "../helpers/melhorenvioSignature.helper.js";
 
 const router = express.Router();
@@ -24,7 +24,7 @@ const router = express.Router();
  * Rota pública para webhooks (sem autenticação)
  */
 router.post(
-  "/webhooks/melhorenvio/events",
+  "/melhorenvio/events",
   webhookAuthMiddleware,
   webhookSchema,
   validateRequest,
@@ -47,7 +47,8 @@ router.get("/auth/callback", oauthCallbackSchema, validateRequest, oauthCallback
  */
 router.get(
   "/orders/:subOrderId/shipping/options",
-  authenticate,
+  isLoggedIn,
+  isSeller,
   calculateShippingSchema,
   validateRequest,
   getShippingOptions,
@@ -59,7 +60,8 @@ router.get(
  */
 router.post(
   "/orders/:subOrderId/shipping/select",
-  authenticate,
+  isLoggedIn,
+  isSeller,
   selectShippingSchema,
   validateRequest,
   selectShippingOption,
@@ -71,7 +73,8 @@ router.post(
  */
 router.post(
   "/orders/:subOrderId/shipping/label",
-  authenticate,
+  isLoggedIn,
+  isSeller,
   generateLabelSchema,
   validateRequest,
   generateLabel,

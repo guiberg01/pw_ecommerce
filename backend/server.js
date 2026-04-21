@@ -82,17 +82,22 @@ const resolveTrustProxyValue = () => {
 
 app.set("trust proxy", resolveTrustProxyValue());
 
-const isStripeCheckoutWebhookRequest = (req) => {
+const isRawBodyWebhookRequest = (req) => {
   const originalUrl = String(req.originalUrl ?? "");
   const url = String(req.url ?? "");
 
-  return originalUrl.startsWith("/api/checkout/webhook/stripe") || url.startsWith("/api/checkout/webhook/stripe");
+  return (
+    originalUrl.startsWith("/api/checkout/webhook/stripe")
+    || url.startsWith("/api/checkout/webhook/stripe")
+    || originalUrl.startsWith("/api/webhooks/melhorenvio/events")
+    || url.startsWith("/api/webhooks/melhorenvio/events")
+  );
 };
 
 app.use(
   express.json({
     verify: (req, res, buf) => {
-      if (isStripeCheckoutWebhookRequest(req)) {
+      if (isRawBodyWebhookRequest(req)) {
         req.rawBody = Buffer.from(buf);
       }
     },

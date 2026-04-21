@@ -1,8 +1,8 @@
 import shippingService from "../services/shipping.service.js";
 import melhorenvioService from "../services/melhorenvio.service.js";
 import MelhorEnvioAuth from "../models/melhorEnvioAuth.model.js";
+import Store from "../models/store.model.js";
 import { sendSuccess } from "../helpers/successResponse.js";
-import { sendError } from "../helpers/errorResponse.js";
 
 /**
  * Controllers para endpoints de shipping
@@ -12,7 +12,7 @@ import { sendError } from "../helpers/errorResponse.js";
  * Obtém opções de frete (cotação)
  * GET /api/shipping/:subOrderId/options
  */
-export const getShippingOptions = async (req, res) => {
+export const getShippingOptions = async (req, res, next) => {
   try {
     const { subOrderId } = req.params;
     const { forceRecalculate } = req.query;
@@ -22,9 +22,9 @@ export const getShippingOptions = async (req, res) => {
       forceRecalculate === "true",
     );
 
-    return sendSuccess(res, options, "Opções de frete obtidas com sucesso", 200);
+    return sendSuccess(res, 200, "Opções de frete obtidas com sucesso", options);
   } catch (error) {
-    return sendError(res, error);
+    return next(error);
   }
 };
 
@@ -32,7 +32,7 @@ export const getShippingOptions = async (req, res) => {
  * Seleciona transportadora
  * POST /api/shipping/:subOrderId/select
  */
-export const selectShippingOption = async (req, res) => {
+export const selectShippingOption = async (req, res, next) => {
   try {
     const { subOrderId } = req.params;
     const { carrierId, quoteId } = req.body;
@@ -43,9 +43,9 @@ export const selectShippingOption = async (req, res) => {
       quoteId,
     );
 
-    return sendSuccess(res, result, "Transportadora selecionada com sucesso", 200);
+    return sendSuccess(res, 200, "Transportadora selecionada com sucesso", result);
   } catch (error) {
-    return sendError(res, error);
+    return next(error);
   }
 };
 
@@ -53,15 +53,15 @@ export const selectShippingOption = async (req, res) => {
  * Gera etiqueta de envio
  * POST /api/shipping/:subOrderId/label
  */
-export const generateLabel = async (req, res) => {
+export const generateLabel = async (req, res, next) => {
   try {
     const { subOrderId } = req.params;
 
     const label = await shippingService.generateLabel(subOrderId);
 
-    return sendSuccess(res, label, "Etiqueta gerada com sucesso", 201);
+    return sendSuccess(res, 201, "Etiqueta gerada com sucesso", label);
   } catch (error) {
-    return sendError(res, error);
+    return next(error);
   }
 };
 
@@ -69,22 +69,22 @@ export const generateLabel = async (req, res) => {
  * Inicia processo OAuth2 com MelhorEnvio
  * GET /api/shipping/auth/authorize
  */
-export const initiateOAuth = async (req, res) => {
+export const initiateOAuth = async (req, res, next) => {
   try {
     const { storeId } = req.query;
 
     if (!storeId) {
-      return sendError(res, {
-        errorCode: "STORE_ID_REQUIRED",
-        message: "storeId é obrigatório",
-      });
+      const error = new Error("storeId é obrigatório");
+      error.status = 400;
+      error.errorCode = "STORE_ID_REQUIRED";
+      throw error;
     }
 
     const authUrl = melhorenvioService.generateAuthorizationUrl(storeId);
 
-    return sendSuccess(res, { authUrl }, "URL de autorização gerada", 200);
+    return sendSuccess(res, 200, "URL de autorização gerada", { authUrl });
   } catch (error) {
-    return sendError(res, error);
+    return next(error);
   }
 };
 
@@ -109,10 +109,20 @@ export const oauthCallback = async (req, res) => {
       await melhorenvioService.exchangeCodeForToken(code);
 
     // Salvar credenciais
-    const auth = await MelhorEnvioAuth.findOneAndUpdate(
+    const store = await Store.findById(storeId).select("owner").lean();
+    if (!store) {
+      return res.status(404).json({
+        success: false,
+        errorCode: "STORE_NOT_FOUND",
+        message: "Loja não encontrada para vincular autenticação",
+      });
+    }
+
+    await MelhorEnvioAuth.findOneAndUpdate(
       { store: storeId },
       {
         store: storeId,
+        user: store.owner,
         accessToken,
         refreshToken,
         expiresAt: new Date(Date.now() + expiresIn * 1000),
