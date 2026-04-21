@@ -1,6 +1,7 @@
 import { randomUUID } from "crypto";
 import { redis } from "../config/redis.js";
 import { markExpiredCoupons } from "../services/coupon.service.js";
+import { notifyCouponsExpiringSoon } from "../services/notification.service.js";
 
 const LOCK_KEY = "jobs:coupon-expiration:lock";
 const LOCK_TTL_MS = Number(process.env.COUPON_EXPIRATION_LOCK_TTL_MS ?? 45_000);
@@ -52,10 +53,17 @@ const runOnce = async () => {
     }
 
     const now = new Date();
+    const expiringNotificationResult = await notifyCouponsExpiringSoon();
     const result = await markExpiredCoupons(now);
 
     if (result.modifiedCount > 0) {
       console.log(`[coupon-expiration] ${result.modifiedCount} cupom(ns) marcados como expirados`);
+    }
+
+    if (expiringNotificationResult.notificationsCreated > 0) {
+      console.log(
+        `[coupon-expiration] ${expiringNotificationResult.notificationsCreated} notificação(ões) de cupom próximo da expiração enviadas`,
+      );
     }
   } catch (error) {
     console.error("[coupon-expiration] falha ao executar job:", error);

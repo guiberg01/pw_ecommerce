@@ -23,6 +23,12 @@ const notificationSchema = new mongoose.Schema(
       required: true,
       trim: true,
     },
+    recipientRole: {
+      type: String,
+      enum: ["customer", "seller", "admin", "everyone"],
+      default: null,
+      index: true,
+    },
     actionUrl: {
       type: String,
       default: null,
@@ -37,6 +43,14 @@ const notificationSchema = new mongoose.Schema(
       type: Date,
       default: null,
     },
+    clickedAt: {
+      type: Date,
+      default: null,
+    },
+    metadata: {
+      type: mongoose.Schema.Types.Mixed,
+      default: null,
+    },
     refModel: {
       refId: {
         type: mongoose.Schema.Types.ObjectId,
@@ -44,7 +58,7 @@ const notificationSchema = new mongoose.Schema(
       },
       refModel: {
         type: String,
-        enum: ["Order", "Product"],
+        enum: ["Order", "SubOrder", "Product", "Store", "Review", "Coupon", "Cart", "Payment"],
         default: null,
       },
     },
@@ -53,6 +67,8 @@ const notificationSchema = new mongoose.Schema(
 );
 
 notificationSchema.index({ user: 1, createdAt: -1 });
+notificationSchema.index({ user: 1, isRead: 1, createdAt: -1 });
+notificationSchema.index({ user: 1, type: 1, createdAt: -1 });
 
 const Notification = mongoose.model("Notification", notificationSchema);
 

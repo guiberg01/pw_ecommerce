@@ -14,6 +14,7 @@ import {
   createStripeOnboardingLinkForStoreOwner,
   getStripeConnectStatusForStoreOwner,
 } from "../services/stripeConnect.service.js";
+import { notifyStoreVisitMilestone } from "../services/notification.service.js";
 
 export const allStores = async (req, res, next) => {
   try {
@@ -47,6 +48,36 @@ export const getStoreById = async (req, res, next) => {
   try {
     const { storeId } = req.params;
     const store = await findStoreByIdOrThrow(storeId);
+
+    // Melhor esforço: contabiliza visitas sem interromper resposta ao cliente.
+    try {
+      const visitsCount = Number(store.visitsCount ?? 0) + 1;
+      const lastMilestone = Number(store.lastVisitMilestoneNotified ?? 0);
+      const currentMilestone = Math.floor(visitsCount / 50) * 50;
+
+      await Store.updateOne(
+        { _id: store._id },
+        {
+          $set: {
+            visitsCount,
+            ...(currentMilestone > 0 && currentMilestone > lastMilestone
+              ? { lastVisitMilestoneNotified: currentMilestone }
+              : {}),
+          },
+        },
+      );
+
+      if (currentMilestone > 0 && currentMilestone > lastMilestone) {
+        await notifyStoreVisitMilestone({
+          storeId: store._id,
+          ownerId: store.owner?._id ?? store.owner,
+          visitsCount: currentMilestone,
+        });
+      }
+    } catch {
+      // Ignore falhas de telemetria de visita para não degradar endpoint público.
+    }
+
     return sendSuccess(res, 200, "Loja encontrada com sucesso", store);
   } catch (error) {
     return next(error);

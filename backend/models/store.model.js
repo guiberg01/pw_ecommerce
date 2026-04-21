@@ -71,6 +71,16 @@ const storeSchema = new mongoose.Schema(
       ref: "Address",
       default: null,
     },
+    visitsCount: {
+      type: Number,
+      default: 0,
+      min: 0,
+    },
+    lastVisitMilestoneNotified: {
+      type: Number,
+      default: 0,
+      min: 0,
+    },
   },
   {
     timestamps: true,
