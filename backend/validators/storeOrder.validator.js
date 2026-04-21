@@ -45,3 +45,7 @@ export const storeOrderListQuerySchema = paginationQuerySchema
       });
     }
   });
+
+export const storeOrderStatusUpdateSchema = z.object({
+  status: z.enum(["processing", "shipping", "delivered"]),
+});
