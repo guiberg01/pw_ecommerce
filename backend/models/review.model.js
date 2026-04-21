@@ -35,12 +35,20 @@ const reviewSchema = new mongoose.Schema(
       type: [String],
       default: [],
     },
+    videos: {
+      type: [String],
+      default: [],
+    },
     sellerReply: {
       comment: {
         type: String,
         default: null,
       },
       repliedAt: {
+        type: Date,
+        default: null,
+      },
+      editedAt: {
         type: Date,
         default: null,
       },
