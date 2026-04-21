@@ -9,6 +9,8 @@ import {
   updateMyStore,
   deleteMyStore,
 } from "../controllers/store.controller.js";
+import { getMyStoreOrderById, getMyStoreOrders } from "../controllers/storeOrder.controller.js";
+import { updateMyStoreOrderStatus } from "../controllers/storeOrderAction.controller.js";
 import { createProductForMyStore } from "../controllers/product.controller.js";
 import { isLoggedIn, isSeller } from "../middleware/auth.middleware.js";
 import { validateBody, validateParams, validateQuery } from "../middleware/validation.middleware.js";
@@ -20,6 +22,11 @@ import {
   stripeOnboardingLinkSchema,
   updateMyStoreSchema,
 } from "../validators/store.validator.js";
+import {
+  storeOrderIdParamSchema,
+  storeOrderListQuerySchema,
+  storeOrderStatusUpdateSchema,
+} from "../validators/storeOrder.validator.js";
 
 const router = Router();
 
@@ -29,6 +36,16 @@ router.get("/", validateQuery(storeListQuerySchema), allStores);
 router.get("/me", isLoggedIn, isSeller, getMyStore);
 router.put("/me", isLoggedIn, isSeller, validateBody(updateMyStoreSchema), updateMyStore);
 router.get("/me/stripe/status", isLoggedIn, isSeller, getMyStoreStripeConnectStatus);
+router.get("/me/orders", isLoggedIn, isSeller, validateQuery(storeOrderListQuerySchema), getMyStoreOrders);
+router.get("/me/orders/:orderId", isLoggedIn, isSeller, validateParams(storeOrderIdParamSchema), getMyStoreOrderById);
+router.patch(
+  "/me/orders/:orderId/status",
+  isLoggedIn,
+  isSeller,
+  validateParams(storeOrderIdParamSchema),
+  validateBody(storeOrderStatusUpdateSchema),
+  updateMyStoreOrderStatus,
+);
 router.post(
   "/me/stripe/onboarding-link",
   isLoggedIn,

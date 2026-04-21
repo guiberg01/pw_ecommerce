@@ -8,6 +8,7 @@ node_modules/
 test.http
 full_api_validation.mjs
 all_sequential_tests.mjs
+order_seller_actions_validation.mjs
 
 #uploads locais
 backend/uploads/

@@ -95,6 +95,9 @@ const paymentSchema = new mongoose.Schema(
 );
 
 paymentSchema.index({ order: 1, stripePaymentIntentId: 1 });
+paymentSchema.index({ stripePaymentIntentId: 1 }, { unique: true, sparse: true });
+paymentSchema.index({ order: 1, status: 1, paidAt: -1, createdAt: -1 });
+paymentSchema.index({ order: 1, createdAt: -1 });
 
 const Payment = mongoose.model("Payment", paymentSchema);
 

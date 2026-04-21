@@ -63,6 +63,38 @@ const appendPaymentEvent = ({ payment, stripeEventId, type, metadata = {} }) => 
   ];
 };
 
+const PAYMENT_ATTEMPT_PRIORITY = {
+  succeeded: 600,
+  partially_refunded: 500,
+  refunded: 400,
+  requires_action: 300,
+  pending: 200,
+  failed: 100,
+};
+
+const paymentAttemptSortByPriority = (a, b) => {
+  const byPriority = (PAYMENT_ATTEMPT_PRIORITY[b.status] ?? 0) - (PAYMENT_ATTEMPT_PRIORITY[a.status] ?? 0);
+  if (byPriority !== 0) return byPriority;
+
+  const byPaidAt = new Date(b.paidAt ?? 0).getTime() - new Date(a.paidAt ?? 0).getTime();
+  if (byPaidAt !== 0) return byPaidAt;
+
+  return new Date(b.createdAt ?? 0).getTime() - new Date(a.createdAt ?? 0).getTime();
+};
+
+const resolvePrimaryPaymentAttemptForOrder = async (orderId) => {
+  const attempts = await Payment.find({ order: orderId })
+    .select("_id order status stripeChargeId paidAt createdAt")
+    .lean();
+
+  if (!attempts.length) {
+    return null;
+  }
+
+  const [primaryAttempt] = [...attempts].sort(paymentAttemptSortByPriority);
+  return primaryAttempt ?? null;
+};
+
 const consumeCouponIfNeeded = async ({ session, couponSnapshot, orderId, userId }) => {
   if (!couponSnapshot?.couponId) return;
 
@@ -759,7 +791,7 @@ export const dispatchPendingPayoutTransfersForStore = async (storeId) => {
       .lean();
     if (!subOrder) continue;
 
-    const payment = await Payment.findOne({ order: subOrder.order }).select("_id order stripeChargeId");
+    const payment = await resolvePrimaryPaymentAttemptForOrder(subOrder.order);
     if (!payment || !payment.stripeChargeId) continue;
 
     try {
