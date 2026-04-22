@@ -9,7 +9,6 @@ test.http
 full_api_validation.mjs
 all_sequential_tests.mjs
 order_seller_actions_validation.mjs
-shipping_melhorenvio_validation.mjs
 shipping_frontend_readiness_validation.mjs
 
 #uploads locais
