@@ -9,6 +9,7 @@ const UPLOAD_ACCESS_BY_CONTEXT = {
   review: new Set(["customer", "admin"]),
   profile: new Set(["customer", "seller", "admin"]),
   banner: new Set(["admin"]),
+  chat: new Set(["customer", "seller", "admin"]),
 };
 
 const resolveUploadContext = (req) => req.params.context;

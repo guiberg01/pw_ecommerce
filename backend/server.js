@@ -22,6 +22,8 @@ import orderRoutes from "./routes/order.route.js";
 import shippingRoutes from "./routes/shipping.route.js";
 import reviewRoutes from "./routes/review.route.js";
 import notificationRoutes from "./routes/notification.route.js";
+import messageRoutes from "./routes/message.route.js";
+import supportRoutes from "./routes/support.route.js";
 
 import { connectDB, disconnectDB } from "./config/db.js";
 import { disconnectRedis } from "./config/redis.js";
@@ -124,6 +126,8 @@ app.use("/api/orders", orderRoutes);
 app.use("/api/shipping", shippingRoutes);
 app.use("/api/reviews", reviewRoutes);
 app.use("/api/notifications", notificationRoutes);
+app.use("/api/messages", messageRoutes);
+app.use("/api/support", supportRoutes);
 app.use("/api/stores/me", shippingRoutes);
 app.use("/api/webhooks", shippingRoutes);
 
