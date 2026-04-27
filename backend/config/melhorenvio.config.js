@@ -19,8 +19,8 @@ const MELHOR_ENVIO_CONFIG = {
   oauth: {
     clientId: process.env.MELHOR_ENVIO_CLIENT_ID,
     clientSecret: process.env.MELHOR_ENVIO_CLIENT_SECRET,
-    redirectUri:
-      process.env.MELHOR_ENVIO_REDIRECT_URI || "http://localhost:3980/api/webhooks/melhorenvio/auth/callback",
+    redirectUri: process.env.MELHOR_ENVIO_REDIRECT_URI || "http://localhost:3980/api/shipping/auth/callback",
+    scope: String(process.env.MELHOR_ENVIO_OAUTH_SCOPE ?? "").trim(),
   },
 
   // Token JWT válido por 30 dias, precisa refresh token
@@ -34,10 +34,10 @@ const MELHOR_ENVIO_CONFIG = {
     refreshToken: "/oauth/token",
 
     // Cotação
-    calculateShipping: "/api/shipment/calculate",
+    calculateShipping: process.env.MELHOR_ENVIO_CALCULATE_ENDPOINT || "/api/v2/me/shipment/calculate",
 
     // Etiquetas
-    createShippingLabel: "/api/shipment",
+    createShippingLabel: process.env.MELHOR_ENVIO_CREATE_LABEL_ENDPOINT || "/api/v2/me/cart",
     getShippingLabel: "/api/shipment/:id",
     getPrintLabel: "/api/shipment/:id/label",
 

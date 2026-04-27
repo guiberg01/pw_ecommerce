@@ -4,6 +4,7 @@ import Shipping from "../models/shipping.model.js";
 import ShippingQuote from "../models/shippingQuote.model.js";
 import melhorenvioService from "./melhorenvio.service.js";
 import MELHOR_ENVIO_CONFIG from "../config/melhorenvio.config.js";
+import { createHttpError } from "../helpers/httpError.js";
 
 /**
  * Serviço de Orquestração de Shipping
@@ -15,15 +16,124 @@ import MELHOR_ENVIO_CONFIG from "../config/melhorenvio.config.js";
  */
 
 class ShippingService {
+  ensureSellerOwnsStoreOrThrow(store, ownerId) {
+    if (!ownerId) return;
+
+    const storeOwnerId = String(store?.owner?._id ?? store?.owner ?? "").trim();
+    const requesterOwnerId = String(ownerId ?? "").trim();
+
+    if (!storeOwnerId || !requesterOwnerId || storeOwnerId !== requesterOwnerId) {
+      throw createHttpError("Acesso proibido ao subpedido informado", 403, undefined, "SHIPPING_FORBIDDEN");
+    }
+  }
+
+  roundCurrency(value) {
+    const numeric = Number(value ?? 0);
+    if (!Number.isFinite(numeric)) return 0;
+    return Math.round((numeric + Number.EPSILON) * 100) / 100;
+  }
+
+  formatCurrencyForProvider(value) {
+    return this.roundCurrency(value).toFixed(2);
+  }
+
+  normalizeBrazilianDocument(value) {
+    return String(value ?? "")
+      .replace(/\D/g, "")
+      .trim();
+  }
+
+  isValidCpf(value) {
+    const cpf = this.normalizeBrazilianDocument(value);
+    if (cpf.length !== 11) return false;
+    if (/^(\d)\1{10}$/.test(cpf)) return false;
+
+    const calcDigit = (base, factor) => {
+      let total = 0;
+      for (const digit of base) {
+        total += Number(digit) * factor;
+        factor -= 1;
+      }
+      const mod = (total * 10) % 11;
+      return mod === 10 ? 0 : mod;
+    };
+
+    const d1 = calcDigit(cpf.slice(0, 9), 10);
+    const d2 = calcDigit(cpf.slice(0, 10), 11);
+    return d1 === Number(cpf[9]) && d2 === Number(cpf[10]);
+  }
+
+  resolvePartyDocument({ document, fieldLabel, errorCode, orderId, subOrderId, sandboxFallback }) {
+    const normalized = this.normalizeBrazilianDocument(document);
+    if (normalized.length === 14) {
+      return {
+        document: normalized,
+        documentType: "CNPJ",
+        fallbackUsed: false,
+      };
+    }
+
+    if (normalized.length === 11 && this.isValidCpf(normalized)) {
+      return {
+        document: normalized,
+        documentType: "CPF",
+        fallbackUsed: false,
+      };
+    }
+
+    if (String(MELHOR_ENVIO_CONFIG.environment).toLowerCase() === "sandbox") {
+      const fallbackDocument = this.normalizeBrazilianDocument(sandboxFallback?.document);
+      const fallbackDocumentType = String(sandboxFallback?.documentType ?? "CPF").toUpperCase();
+
+      if (
+        (fallbackDocumentType === "CPF" && fallbackDocument.length !== 11) ||
+        (fallbackDocumentType === "CNPJ" && fallbackDocument.length !== 14)
+      ) {
+        throw createHttpError(
+          `Fallback de documento inválido para ${fieldLabel}`,
+          500,
+          { fieldLabel, fallbackDocument, fallbackDocumentType },
+          "SHIPPING_SANDBOX_FALLBACK_DOCUMENT_INVALID",
+        );
+      }
+
+      if (fallbackDocumentType === "CPF" && !this.isValidCpf(fallbackDocument)) {
+        throw createHttpError(
+          `Fallback de CPF inválido para ${fieldLabel}`,
+          500,
+          { fieldLabel, fallbackDocument },
+          "SHIPPING_SANDBOX_FALLBACK_CPF_INVALID",
+        );
+      }
+
+      return {
+        // Documento fictício válido para ambiente de testes.
+        document: fallbackDocument,
+        documentType: fallbackDocumentType,
+        fallbackUsed: true,
+      };
+    }
+
+    throw createHttpError(
+      `${fieldLabel} é obrigatório para gerar etiqueta no MelhorEnvio`,
+      400,
+      {
+        orderId,
+        subOrderId,
+      },
+      errorCode,
+    );
+  }
+
   resolveFreightPolicy(subOrder) {
     const coupon = subOrder?.coupon ?? null;
     const code = String(coupon?.code ?? "").toUpperCase();
 
     const explicitFreeShippingFlag =
-      coupon?.freeShipping === true
-      || coupon?.isFreeShipping === true
-      || coupon?.benefitType === "free_shipping"
-      || coupon?.type === "free_shipping";
+      coupon?.freeShipping === true ||
+      coupon?.isFreeShipping === true ||
+      coupon?.benefitType === "free_shipping" ||
+      coupon?.type === "free_shipping";
 
     const freeShippingCodePattern = /(FRETE\s*GRATIS|FRETEGRATIS|FREE\s*SHIPPING|SHIPFREE)/i;
     const isFreeShippingByCode = freeShippingCodePattern.test(code);
@@ -42,33 +152,31 @@ class ShippingService {
    * Obtém opções de frete para um subOrder
    * Chama MelhorEnvio API sempre para ter cotação fresca
    */
-  async getShippingOptions(subOrderId, forceRecalculate = false) {
+  async getShippingOptions(subOrderId, forceRecalculate = false, ownerId) {
     const subOrder = await SubOrder.findById(subOrderId)
       .populate("order")
-      .populate({ path: "store", populate: { path: "address" } })
+      .populate({ path: "store", populate: [{ path: "address" }, { path: "owner", select: "_id" }] })
       .populate("items.productVariantId");
 
     if (!subOrder) {
-      throw {
-        errorCode: "SUBORDER_NOT_FOUND",
-        message: "SubOrder não encontrada",
-      };
+      throw createHttpError("SubOrder não encontrada", 404, undefined, "SUBORDER_NOT_FOUND");
     }
 
     const order = subOrder.order;
     if (!order.shippingAddress) {
-      throw {
-        errorCode: "SHIPPING_ADDRESS_REQUIRED",
-        message: "Endereço de entrega não configurado no pedido",
-      };
+      throw createHttpError(
+        "Endereço de entrega não configurado no pedido",
+        400,
+        undefined,
+        "SHIPPING_ADDRESS_REQUIRED",
+      );
     }
 
     const store = subOrder.store;
+    this.ensureSellerOwnsStoreOrThrow(store, ownerId);
+
     if (!store.address) {
-      throw {
-        errorCode: "STORE_ADDRESS_REQUIRED",
-        message: "Endereço da loja não configurado",
-      };
+      throw createHttpError("Endereço da loja não configurado", 400, undefined, "STORE_ADDRESS_REQUIRED");
     }
 
     // Buscar cotação existente (válida por 7 dias, não expirada)
@@ -162,31 +270,52 @@ class ShippingService {
   /**
    * Seleciona transportadora e cria ShippingLabel
    */
-  async selectShippingOption(subOrderId, carrierId, quoteId) {
-    const subOrder = await SubOrder.findById(subOrderId).populate("order").populate("store");
+  async selectShippingOption(subOrderId, carrierId, quoteId, ownerId) {
+    const subOrder = await SubOrder.findById(subOrderId)
+      .populate("order")
+      .populate({ path: "store", populate: { path: "owner", select: "_id" } });
 
     if (!subOrder) {
-      throw {
-        errorCode: "SUBORDER_NOT_FOUND",
-        message: "SubOrder não encontrada",
-      };
+      throw createHttpError("SubOrder não encontrada", 404, undefined, "SUBORDER_NOT_FOUND");
+    }
+
+    this.ensureSellerOwnsStoreOrThrow(subOrder.store, ownerId);
+
+    if (subOrder.shipping) {
+      throw createHttpError(
+        "Frete já configurado para este subpedido",
+        409,
+        undefined,
+        "SUBORDER_SHIPPING_ALREADY_SET",
+      );
     }
 
     const quote = await ShippingQuote.findById(quoteId);
     if (!quote) {
-      throw {
-        errorCode: "QUOTE_NOT_FOUND",
-        message: "Cotação de frete não encontrada",
-      };
+      throw createHttpError("Cotação de frete não encontrada", 404, undefined, "QUOTE_NOT_FOUND");
+    }
+
+    if (quote.subOrder.toString() !== subOrderId.toString()) {
+      throw createHttpError("Cotação de frete inválida para este pedido", 400, undefined, "QUOTE_SUBORDER_MISMATCH");
+    }
+
+    if (quote.expiresAt <= new Date()) {
+      throw createHttpError("Cotação de frete expirada", 400, undefined, "QUOTE_EXPIRED");
+    }
+
+    if (quote.convertedToLabel) {
+      throw createHttpError(
+        "Esta cotação já foi utilizada para gerar frete",
+        409,
+        undefined,
+        "QUOTE_ALREADY_CONVERTED",
+      );
     }
 
     // Validar que carrier é válido
     const selectedCarrier = quote.carriers.find((c) => String(c.id) === String(carrierId));
     if (!selectedCarrier) {
-      throw {
-        errorCode: "INVALID_CARRIER",
-        message: "Transportadora selecionada não é válida",
-      };
+      throw createHttpError("Transportadora selecionada não é válida", 400, undefined, "INVALID_CARRIER");
     }
 
     // Atualizar quote com seleção
@@ -198,6 +327,10 @@ class ShippingService {
       store: subOrder.store._id,
       subOrder: subOrderId,
       carrier: this.mapCarrierName(selectedCarrier.name),
+      shippingServiceInfo: {
+        meServiceId: Number(selectedCarrier.id),
+        meCarrierName: selectedCarrier.name,
+      },
       whoPays: quote.whoPays,
       shippingCost: quote.freeShipping ? 0 : selectedCarrier.price,
       estimatedDeliveryDate: this.calculateDeliveryDate(selectedCarrier.deliveryTime),
@@ -223,59 +356,125 @@ class ShippingService {
    * Gera etiqueta no MelhorEnvio
    * Transforma shipping de "pending" para "posted" (se sucesso)
    */
-  async generateLabel(subOrderId) {
+  async generateLabel(subOrderId, ownerId) {
     const subOrder = await SubOrder.findById(subOrderId)
-      .populate({ path: "order", populate: { path: "user", select: "email" } })
+      .populate({ path: "order", populate: { path: "user", select: "email cpf" } })
       .populate({
         path: "store",
-        populate: [{ path: "address" }, { path: "owner", select: "email" }],
+        populate: [{ path: "address" }, { path: "owner", select: "_id email" }],
       })
       .populate("shipping");
 
     if (!subOrder) {
-      throw {
-        errorCode: "SUBORDER_NOT_FOUND",
-        message: "SubOrder não encontrada",
-      };
+      throw createHttpError("SubOrder não encontrada", 404, undefined, "SUBORDER_NOT_FOUND");
     }
 
+    this.ensureSellerOwnsStoreOrThrow(subOrder.store, ownerId);
+
     if (!subOrder.shipping) {
-      throw {
-        errorCode: "SHIPPING_NOT_CONFIGURED",
-        message: "Frete não foi configurado para este subOrder",
-      };
+      throw createHttpError("Frete não foi configurado para este subOrder", 400, undefined, "SHIPPING_NOT_CONFIGURED");
     }
 
     const shipping = subOrder.shipping;
     const order = subOrder.order;
     const store = subOrder.store;
+    const isSandbox = String(MELHOR_ENVIO_CONFIG.environment).toLowerCase() === "sandbox";
+    const selectedQuote = await ShippingQuote.findOne({ subOrder: subOrderId }).select("selectedCarrier").lean();
+    const selectedCarrierSnapshot = shipping?.shippingServiceInfo?.selectedCarrier ?? selectedQuote?.selectedCarrier;
+
+    const serviceIdFromShipping = Number(shipping?.shippingServiceInfo?.meServiceId);
+    const serviceIdFromSnapshot = Number(selectedCarrierSnapshot?.id);
+    const serviceIdFromQuote = Number(selectedQuote?.selectedCarrier?.id);
+    const fallbackServiceId = this.getServiceId(shipping.carrier);
+    const resolvedServiceId =
+      Number.isFinite(serviceIdFromShipping) && serviceIdFromShipping > 0
+        ? serviceIdFromShipping
+        : Number.isFinite(serviceIdFromSnapshot) && serviceIdFromSnapshot > 0
+          ? serviceIdFromSnapshot
+          : Number.isFinite(serviceIdFromQuote) && serviceIdFromQuote > 0
+            ? serviceIdFromQuote
+            : fallbackServiceId;
+    const senderDocument = this.resolvePartyDocument({
+      document: store.cnpj,
+      fieldLabel: "CNPJ/CPF do remetente",
+      errorCode: "SHIPPING_SENDER_DOCUMENT_REQUIRED",
+      orderId: order._id,
+      subOrderId: subOrder._id,
+      sandboxFallback: {
+        // CPF fictício para sandbox.
+        document: "52998224725",
+        documentType: "CPF",
+      },
+    });
+    const recipientDocument = this.resolvePartyDocument({
+      document: order.user?.cpf,
+      fieldLabel: "CNPJ/CPF do destinatário",
+      errorCode: "SHIPPING_RECIPIENT_DOCUMENT_REQUIRED",
+      orderId: order._id,
+      subOrderId: subOrder._id,
+      sandboxFallback: {
+        // CPF fictício para sandbox.
+        document: "39053344705",
+        documentType: "CPF",
+      },
+    });
+
+    if (isSandbox && senderDocument.documentType !== "CPF") {
+      senderDocument.document = "52998224725";
+      senderDocument.documentType = "CPF";
+      senderDocument.fallbackUsed = true;
+    }
+
+    if (senderDocument.document === recipientDocument.document) {
+      if (isSandbox) {
+        recipientDocument.document = "39053344705";
+        recipientDocument.documentType = "CPF";
+      } else {
+        throw createHttpError(
+          "CPF/CNPJ do remetente e do destinatário não podem ser iguais",
+          400,
+          { orderId: order._id, subOrderId: subOrder._id },
+          "SHIPPING_SENDER_RECIPIENT_DOCUMENT_EQUAL",
+        );
+      }
+    }
 
     // Validar status do Order (precisa estar paid)
     if (order.status !== "paid") {
-      throw {
-        errorCode: "ORDER_NOT_PAID",
-        message: `Pedido deve estar pago antes de gerar etiqueta. Status atual: ${order.status}`,
-      };
+      throw createHttpError(
+        `Pedido deve estar pago antes de gerar etiqueta. Status atual: ${order.status}`,
+        409,
+        { status: order.status },
+        "ORDER_NOT_PAID",
+      );
     }
 
     // Validar endereços
     if (!order.shippingAddress || !store.address) {
-      throw {
-        errorCode: "ADDRESSES_REQUIRED",
-        message: "Endereços de origem ou destino não configurados",
-      };
+      throw createHttpError("Endereços de origem ou destino não configurados", 400, undefined, "ADDRESSES_REQUIRED");
     }
 
+    const productsForLabel = (subOrder.items ?? []).map((item) => ({
+      name: item.name,
+      quantity: Number(item.quantity ?? 0),
+      unitary_value: this.formatCurrencyForProvider(item.price),
+    }));
+    const productsDeclaredTotal = this.roundCurrency(
+      productsForLabel.reduce((sum, item) => sum + Number(item.unitary_value ?? 0) * Number(item.quantity ?? 0), 0),
+    );
+
     // Montar payload para criar etiqueta
+    const insuredValue = this.roundCurrency(Math.max(1, productsDeclaredTotal));
+
     const payload = {
-      service: this.getServiceId(shipping.carrier),
+      service: resolvedServiceId,
       from: {
         name: store.name,
         phone: store.address.phoneNumber || "0000000000",
         email: store.owner?.email || null,
-        document: store.cnpj || "", // IMPORTANTE para comercial
+        document: senderDocument.document,
         state_register: "",
-        document_type: "CNPJ",
+        document_type: senderDocument.documentType,
         postal_code: store.address.zipCode.replace("-", ""),
         address: store.address.street,
         number: store.address.number,
@@ -288,7 +487,8 @@ class ShippingService {
         name: order.shippingAddress.receiverName,
         phone: order.shippingAddress.phoneNumber,
         email: order.user?.email || null,
-        document_type: "CPF",
+        document: recipientDocument.document,
+        document_type: recipientDocument.documentType,
         postal_code: order.shippingAddress.zipCode.replace("-", ""),
         address: order.shippingAddress.street,
         number: order.shippingAddress.number,
@@ -297,11 +497,7 @@ class ShippingService {
         city: order.shippingAddress.city,
         state: order.shippingAddress.state,
       },
-      products: subOrder.items.map((item) => ({
-        name: item.name,
-        quantity: item.quantity,
-        unitary_value: item.price,
-      })),
+      products: productsForLabel,
       volumes: shipping.dimensions?.weight
         ? [
             {
@@ -315,15 +511,68 @@ class ShippingService {
             },
           ]
         : undefined,
-      receipt: true, // Solicitar confirmação de entrega
-      own_hand: false,
-      value: order.totalPriceProducts,
-      insurance_value: order.totalPriceProducts,
+      options: {
+        receipt: true,
+        own_hand: false,
+        insurance_value: this.formatCurrencyForProvider(insuredValue),
+      },
+      value: this.formatCurrencyForProvider(insuredValue),
+      insurance_value: this.formatCurrencyForProvider(insuredValue),
       reference: `ORDER_${order._id}`,
     };
 
-    // Chamar API MelhorEnvio
-    const labelResult = await melhorenvioService.createShippingLabel(store._id, payload);
+    let labelResult = null;
+    try {
+      labelResult = await melhorenvioService.createShippingLabel(store._id, payload);
+      shipping.shippingServiceInfo = {
+        ...(shipping.shippingServiceInfo ?? {}),
+        meServiceId: resolvedServiceId,
+      };
+    } catch (error) {
+      const providerError = error?.details?.error;
+      const providerMessage = String(
+        typeof providerError === "string" ? providerError : (providerError?.message ?? error?.message ?? ""),
+      ).toLowerCase();
+
+      const declaredValueDiagnostics = {
+        value: payload.value,
+        insurance_value: payload.insurance_value,
+        options_insurance_value: payload.options?.insurance_value,
+        productsDeclaredTotal,
+      };
+
+      if (providerMessage.includes("transportadora") && providerMessage.includes("nao atende")) {
+        throw createHttpError(
+          "A transportadora escolhida no checkout não atende mais este trecho para emissão da etiqueta. Refaça o checkout para nova seleção de frete.",
+          409,
+          {
+            orderId: order._id,
+            subOrderId: subOrder._id,
+            selectedServiceId: resolvedServiceId,
+            selectedCarrier: selectedCarrierSnapshot ?? null,
+            providerError: error?.details,
+            declaredValueDiagnostics,
+          },
+          "CHECKOUT_SELECTED_CARRIER_UNAVAILABLE",
+        );
+      }
+
+      if (error?.code === "ME_CREATE_LABEL_FAILED") {
+        throw createHttpError(
+          error.message,
+          error.statusCode ?? 502,
+          {
+            ...(typeof error?.details === "object" && error?.details !== null
+              ? error.details
+              : { error: error?.details }),
+            declaredValueDiagnostics,
+          },
+          error.code,
+        );
+      }
+
+      throw error;
+    }
 
     // Atualizar Shipping com dados do ME
     shipping.melhorEnvioOrderId = labelResult.id;
@@ -357,6 +606,83 @@ class ShippingService {
   }
 
   /**
+   * Retorna a URL da etiqueta já gerada para um subOrder.
+   * Se o labelUrl não estiver salvo localmente, tenta recuperar do MelhorEnvio.
+   */
+  async getLabelUrl(subOrderId, ownerId) {
+    const subOrder = await SubOrder.findById(subOrderId).populate({
+      path: "store",
+      populate: { path: "owner", select: "_id" },
+    });
+
+    if (!subOrder) {
+      throw createHttpError("SubOrder não encontrada", 404, undefined, "SUBORDER_NOT_FOUND");
+    }
+
+    this.ensureSellerOwnsStoreOrThrow(subOrder.store, ownerId);
+
+    const shipping = await Shipping.findOne({ subOrder: subOrderId }).select(
+      "_id subOrder store melhorEnvioOrderId labelUrl trackingCode status updatedAt",
+    );
+
+    if (!shipping) {
+      throw createHttpError("Shipping não encontrado para este subOrder", 404, undefined, "SHIPPING_NOT_FOUND");
+    }
+
+    if (shipping.labelUrl) {
+      return {
+        shippingId: shipping._id,
+        subOrderId: shipping.subOrder,
+        labelUrl: shipping.labelUrl,
+        trackingCode: shipping.trackingCode,
+        melhorEnvioId: shipping.melhorEnvioOrderId,
+        status: shipping.status,
+        updatedAt: shipping.updatedAt,
+        source: "local",
+      };
+    }
+
+    if (!shipping.melhorEnvioOrderId) {
+      throw createHttpError(
+        "Etiqueta ainda não foi gerada para este envio",
+        404,
+        { subOrderId },
+        "SHIPPING_LABEL_NOT_GENERATED",
+      );
+    }
+
+    const providerData = await melhorenvioService.getPrintLabel(shipping.store, shipping.melhorEnvioOrderId, "url");
+
+    const providerLabelUrl =
+      typeof providerData === "string"
+        ? providerData
+        : providerData?.url || providerData?.label || providerData?.link || null;
+
+    if (!providerLabelUrl) {
+      throw createHttpError(
+        "MelhorEnvio não retornou URL de impressão da etiqueta",
+        502,
+        { subOrderId, melhorEnvioId: shipping.melhorEnvioOrderId, providerData },
+        "ME_LABEL_URL_NOT_FOUND",
+      );
+    }
+
+    shipping.labelUrl = providerLabelUrl;
+    await shipping.save();
+
+    return {
+      shippingId: shipping._id,
+      subOrderId: shipping.subOrder,
+      labelUrl: providerLabelUrl,
+      trackingCode: shipping.trackingCode,
+      melhorEnvioId: shipping.melhorEnvioOrderId,
+      status: shipping.status,
+      updatedAt: shipping.updatedAt,
+      source: "provider",
+    };
+  }
+
+  /**
    * Atualiza status de shipping via webhook ou polling
    */
   async updateLabelStatus(melhorEnvioId, melhorEnvioStatus) {
@@ -374,9 +700,7 @@ class ShippingService {
 
     // Se já tem esse status, não update
     if (shipping.status === newStatus) {
-      console.info(
-        `[Shipping] webhook idempotente ignorado (melhorEnvioId=${melhorEnvioId}, status=${newStatus})`,
-      );
+      console.info(`[Shipping] webhook idempotente ignorado (melhorEnvioId=${melhorEnvioId}, status=${newStatus})`);
       return shipping;
     }
 
@@ -462,7 +786,8 @@ class ShippingService {
   }
 
   getServiceId(carrierName) {
-    return MELHOR_ENVIO_CONFIG.carriers[carrierName.toUpperCase()]?.id || 1;
+    const normalizedCarrierName = String(carrierName ?? "").trim().toUpperCase();
+    return MELHOR_ENVIO_CONFIG.carriers[normalizedCarrierName]?.id || 1;
   }
 
   calculateDeliveryDate(deliveryTimeDays) {

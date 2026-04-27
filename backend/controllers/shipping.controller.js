@@ -3,6 +3,30 @@ import melhorenvioService from "../services/melhorenvio.service.js";
 import MelhorEnvioAuth from "../models/melhorEnvioAuth.model.js";
 import Store from "../models/store.model.js";
 import { sendSuccess } from "../helpers/successResponse.js";
+import { createHttpError } from "../helpers/httpError.js";
+
+const resolveSellerDashboardBaseUrl = () => {
+  const candidates = [
+    process.env.SELLER_DASHBOARD_BASE_URL,
+    process.env.FRONTEND_BASE_URL,
+    process.env.CLIENT_BASE_URL,
+    process.env.WEB_BASE_URL,
+  ];
+
+  const raw = candidates.find((value) => String(value ?? "").trim());
+  return raw ? String(raw).trim().replace(/\/$/, "") : null;
+};
+
+const isLocalDevelopmentUrl = (value) => {
+  if (!value) return false;
+
+  try {
+    const parsedUrl = new URL(value);
+    return ["localhost", "127.0.0.1", "0.0.0.0"].includes(parsedUrl.hostname);
+  } catch {
+    return false;
+  }
+};
 
 /**
  * Controllers para endpoints de shipping
@@ -17,10 +41,7 @@ export const getShippingOptions = async (req, res, next) => {
     const { subOrderId } = req.params;
     const { forceRecalculate } = req.query;
 
-    const options = await shippingService.getShippingOptions(
-      subOrderId,
-      forceRecalculate === "true",
-    );
+    const options = await shippingService.getShippingOptions(subOrderId, forceRecalculate === "true", req.user?._id);
 
     return sendSuccess(res, 200, "Opções de frete obtidas com sucesso", options);
   } catch (error) {
@@ -37,11 +58,7 @@ export const selectShippingOption = async (req, res, next) => {
     const { subOrderId } = req.params;
     const { carrierId, quoteId } = req.body;
 
-    const result = await shippingService.selectShippingOption(
-      subOrderId,
-      carrierId,
-      quoteId,
-    );
+    const result = await shippingService.selectShippingOption(subOrderId, carrierId, quoteId, req.user?._id);
 
     return sendSuccess(res, 200, "Transportadora selecionada com sucesso", result);
   } catch (error) {
@@ -57,9 +74,25 @@ export const generateLabel = async (req, res, next) => {
   try {
     const { subOrderId } = req.params;
 
-    const label = await shippingService.generateLabel(subOrderId);
+    const label = await shippingService.generateLabel(subOrderId, req.user?._id);
 
     return sendSuccess(res, 201, "Etiqueta gerada com sucesso", label);
+  } catch (error) {
+    return next(error);
+  }
+};
+
+/**
+ * Obtém a URL da etiqueta já gerada
+ * GET /api/stores/me/orders/:subOrderId/shipping/label
+ */
+export const getLabelUrl = async (req, res, next) => {
+  try {
+    const { subOrderId } = req.params;
+
+    const label = await shippingService.getLabelUrl(subOrderId, req.user?._id);
+
+    return sendSuccess(res, 200, "URL da etiqueta obtida com sucesso", label);
   } catch (error) {
     return next(error);
   }
@@ -74,10 +107,16 @@ export const initiateOAuth = async (req, res, next) => {
     const { storeId } = req.query;
 
     if (!storeId) {
-      const error = new Error("storeId é obrigatório");
-      error.status = 400;
-      error.errorCode = "STORE_ID_REQUIRED";
-      throw error;
+      throw createHttpError("storeId é obrigatório", 400, undefined, "STORE_ID_REQUIRED");
+    }
+
+    const store = await Store.findById(storeId).select("_id owner").lean();
+    if (!store) {
+      throw createHttpError("Loja não encontrada", 404, undefined, "STORE_NOT_FOUND");
+    }
+
+    if (String(store.owner) !== String(req.user?._id ?? "")) {
+      throw createHttpError("Acesso proibido para vincular esta loja", 403, undefined, "STORE_FORBIDDEN");
     }
 
     const authUrl = melhorenvioService.generateAuthorizationUrl(storeId);
@@ -94,19 +133,18 @@ export const initiateOAuth = async (req, res, next) => {
  */
 export const oauthCallback = async (req, res) => {
   try {
-    const { code, state: storeId } = req.query;
+    const { code, state: storeId, error, error_description: errorDescription } = req.query;
 
-    if (!code || !storeId) {
+    if (error || !code || !storeId) {
       return res.status(400).json({
         success: false,
-        errorCode: "INVALID_OAUTH_CALLBACK",
-        message: "code e state são obrigatórios",
+        errorCode: error ? "MELHOR_ENVIO_OAUTH_ERROR" : "INVALID_OAUTH_CALLBACK",
+        message: errorDescription || error || "OAuth do MelhorEnvio não retornou code/state válidos",
       });
     }
 
     // Trocar code por token
-    const { accessToken, refreshToken, expiresIn } =
-      await melhorenvioService.exchangeCodeForToken(code);
+    const { accessToken, refreshToken, expiresIn } = await melhorenvioService.exchangeCodeForToken(code);
 
     // Salvar credenciais
     const store = await Store.findById(storeId).select("owner").lean();
@@ -132,14 +170,29 @@ export const oauthCallback = async (req, res) => {
       { upsert: true, new: true },
     );
 
-    // Redirecionar para dashboard do seller
-    return res.redirect(
-      `/dashboard/stores/${storeId}/shipping?authenticated=true`,
-    );
+    const dashboardPath = `/dashboard/stores/${storeId}/shipping?authenticated=true`;
+    const dashboardBaseUrl = resolveSellerDashboardBaseUrl();
+
+    // Em desenvolvimento local, evitar redirecionamento automático para localhost.
+    if (dashboardBaseUrl && !isLocalDevelopmentUrl(dashboardBaseUrl)) {
+      return res.redirect(`${dashboardBaseUrl}${dashboardPath}`);
+    }
+
+    // Fallback seguro para evitar 404 em rota inexistente no backend.
+    return res.status(200).json({
+      success: true,
+      message: "Autenticação com MelhorEnvio concluída com sucesso",
+      data: {
+        storeId,
+        authenticated: true,
+        dashboardPath,
+      },
+      timestamp: new Date().toISOString(),
+    });
   } catch (error) {
     return res.status(500).json({
       success: false,
-      errorCode: error.errorCode || "OAUTH_FAILED",
+      errorCode: error.code || "OAUTH_FAILED",
       message: error.message,
       details: error.details,
     });
@@ -153,9 +206,6 @@ export const oauthCallback = async (req, res) => {
 export const handleWebhook = async (req, res) => {
   try {
     const { event, data } = req.body;
-
-    // Validar assinatura HMAC-SHA256
-    // TODO: implementar verificação de X-ME-Signature
 
     // Map de eventos
     const eventHandlers = {
@@ -205,7 +255,7 @@ export const handleWebhook = async (req, res) => {
     return res.status(200).json({
       success: false,
       message: "Erro ao processar webhook",
-      errorCode: error.errorCode || "WEBHOOK_ERROR",
+      errorCode: error.code || "WEBHOOK_ERROR",
     });
   }
 };
