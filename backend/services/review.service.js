@@ -1,6 +1,7 @@
 import mongoose from "mongoose";
 import Review from "../models/review.model.js";
 import Product from "../models/product.model.js";
+import ProductVariant from "../models/productVariant.model.js";
 import SubOrder from "../models/subOrder.model.js";
 import Order from "../models/order.model.js";
 import { createHttpError } from "../helpers/httpError.js";
@@ -124,10 +125,9 @@ const ensureReviewEligibilityOrThrow = async ({ userId, productId, subOrderId, s
   }
 
   const productVariantIds = new Set(subOrder.items.map((item) => item.productVariantId.toString()));
-  const hasProduct = await Product.exists({
-    _id: productId,
-    status: { $ne: "deleted" },
-    "productVariants._id": { $in: [...productVariantIds] },
+  const hasProduct = await ProductVariant.exists({
+    _id: { $in: [...productVariantIds] },
+    product: productId,
   });
 
   if (!hasProduct) {

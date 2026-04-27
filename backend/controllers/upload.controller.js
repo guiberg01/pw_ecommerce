@@ -14,6 +14,20 @@ const UPLOAD_ACCESS_BY_CONTEXT = {
 
 const resolveUploadContext = (req) => req.params.context;
 
+const resolvePublicBaseUrl = (req) => {
+  const explicitBaseUrl = String(process.env.PUBLIC_BASE_URL ?? "").trim();
+  if (explicitBaseUrl) {
+    return explicitBaseUrl.replace(/\/$/, "");
+  }
+
+  const forwardedProtoHeader = req.get("x-forwarded-proto");
+  const forwardedProto = String(forwardedProtoHeader ?? "").split(",")[0].trim();
+  const protocol = forwardedProto || (req.secure ? "https" : req.protocol);
+  const host = req.get("x-forwarded-host") || req.get("host");
+
+  return `${protocol}://${host}`;
+};
+
 const validateUploadContextOrThrow = (context) => {
   if (!UPLOAD_ACCESS_BY_CONTEXT[context]) {
     throw createHttpError("Contexto de upload inválido", 400, undefined, "UPLOAD_CONTEXT_INVALID");
@@ -89,7 +103,7 @@ export const uploadImageByContext = async (req, res, next) => {
     }
 
     const context = resolveUploadContext(req);
-    const baseUrl = `${req.protocol}://${req.get("host")}`;
+    const baseUrl = resolvePublicBaseUrl(req);
     const imageUrl = `${baseUrl}/uploads/${req.file.filename}`;
 
     return sendSuccess(res, 201, "Imagem enviada com sucesso", {

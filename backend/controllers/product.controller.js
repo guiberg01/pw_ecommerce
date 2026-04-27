@@ -51,7 +51,12 @@ export const createProductForMyStore = async (req, res, next) => {
       variants,
     });
 
-    return sendSuccess(res, 201, "Produto criado com sucesso", productWithStore);
+    const productResponse = productWithStore.toObject();
+
+    return sendSuccess(res, 201, "Produto criado com sucesso", {
+      ...productResponse,
+      mainVariantId: productResponse.mainVariant?._id?.toString?.() ?? null,
+    });
   } catch (error) {
     return next(error);
   }
