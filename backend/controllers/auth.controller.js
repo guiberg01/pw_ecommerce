@@ -15,13 +15,15 @@ export const signup = async (req, res, next) => {
 
     const user = await User.create({ name, email, password, role });
 
-    await startUserSession(req, res, user._id);
+    const { accessToken, refreshToken } = await startUserSession(req, res, user._id);
 
     return sendSuccess(res, 201, "Cadastro realizado com sucesso", {
       id: user._id,
       name: user.name,
       email: user.email,
       role: user.role,
+      accessToken,
+      refreshToken,
     });
   } catch (error) {
     return next(error);
@@ -37,13 +39,15 @@ export const login = async (req, res, next) => {
       throw createHttpError("Credenciais inválidas", 401, undefined, "AUTH_INVALID_CREDENTIALS");
     }
 
-    await startUserSession(req, res, user._id);
+    const { accessToken, refreshToken } = await startUserSession(req, res, user._id);
 
     return sendSuccess(res, 200, "Login realizado com sucesso", {
       id: user._id,
       name: user.name,
       email: user.email,
       role: user.role,
+      accessToken,
+      refreshToken,
     });
   } catch (error) {
     return next(error);
