@@ -6,6 +6,7 @@ export const createStoreSchema = z.object({
   name: z.string().trim().min(1, "Nome da loja é obrigatório"),
   description: z.string().trim().optional().default(""),
   logoUrl: z.string().trim().url("A logo deve ser uma URL válida").optional().default(""),
+  addressId: mongoIdSchema.optional(),
 });
 
 export const updateMyStoreSchema = z
@@ -13,6 +14,7 @@ export const updateMyStoreSchema = z
     name: z.string().trim().min(1, "Nome da loja é obrigatório").optional(),
     description: z.string().trim().optional(),
     logoUrl: z.string().trim().url("A logo deve ser uma URL válida").optional(),
+    addressId: mongoIdSchema.optional(),
   })
   .refine((data) => Object.keys(data).length > 0, {
     message: "Envie ao menos um campo para atualização",

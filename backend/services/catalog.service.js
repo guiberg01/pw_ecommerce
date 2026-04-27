@@ -2,6 +2,7 @@ import Product from "../models/product.model.js";
 import ProductVariant from "../models/productVariant.model.js";
 import Store from "../models/store.model.js";
 import Category from "../models/category.model.js";
+import Address from "../models/address.model.js";
 import { createHttpError } from "../helpers/httpError.js";
 import {
   createDocumentWithUniqueSlug,
@@ -111,6 +112,17 @@ const ensureCategoryIsActiveOrThrow = async (categoryId) => {
   if (!category) {
     throw createHttpError("Categoria inválida ou inativa", 400, undefined, "CATEGORY_INVALID_OR_INACTIVE");
   }
+};
+
+const ensureAddressBelongsToOwnerOrThrow = async (addressId, ownerId) => {
+  if (!addressId) return null;
+
+  const address = await Address.findOne({ _id: addressId, user: ownerId }).select("_id user");
+  if (!address) {
+    throw createHttpError("Endereço inválido para a loja", 400, undefined, "STORE_ADDRESS_INVALID");
+  }
+
+  return address;
 };
 
 const cleanupCreatedProduct = async (productId) => {
@@ -279,7 +291,8 @@ export const findProductVariantByIdOrThrow = async (variantId) => {
 };
 
 export const createStores = async (id, data) => {
-  const { name, description, logoUrl } = data;
+  const { name, description, logoUrl, addressId } = data;
+  const validAddress = await ensureAddressBelongsToOwnerOrThrow(addressId, id);
   const existingStore = await Store.findOne({ owner: id, status: { $ne: "deleted" } });
   if (existingStore) {
     throw createHttpError("Este seller já possui uma loja", 409, undefined, "STORE_ALREADY_EXISTS");
@@ -291,6 +304,7 @@ export const createStores = async (id, data) => {
     deletedStore.name = name;
     deletedStore.description = description ?? "";
     deletedStore.logoUrl = logoUrl ?? "";
+    deletedStore.address = validAddress?._id ?? deletedStore.address ?? null;
     deletedStore.status = "active";
 
     const slugSaved = await saveDocumentWithUniqueSlug({
@@ -314,6 +328,7 @@ export const createStores = async (id, data) => {
         description: description,
         logoUrl: logoUrl,
         owner: id,
+        address: validAddress?._id ?? null,
       },
       sourceValue: name,
       maxRetries: MAX_SLUG_RETRIES,
@@ -334,8 +349,13 @@ export const createStores = async (id, data) => {
 };
 
 export const updateStoreForOwner = async (ownerId, data) => {
-  const { name, description, logoUrl } = data;
+  const { name, description, logoUrl, addressId } = data;
   const store = await findActiveStoreByOwnerOrThrow(ownerId);
+
+  if (addressId !== undefined) {
+    const validAddress = await ensureAddressBelongsToOwnerOrThrow(addressId, ownerId);
+    store.address = validAddress?._id ?? null;
+  }
 
   if (description !== undefined) store.description = description;
   if (logoUrl !== undefined) store.logoUrl = logoUrl;
@@ -356,7 +376,7 @@ export const updateStoreForOwner = async (ownerId, data) => {
     return store;
   }
 
-  if (description !== undefined || logoUrl !== undefined) {
+  if (description !== undefined || logoUrl !== undefined || addressId !== undefined) {
     await store.save();
   }
 
