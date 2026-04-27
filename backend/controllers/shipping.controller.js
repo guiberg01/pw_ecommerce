@@ -34,7 +34,7 @@ const isLocalDevelopmentUrl = (value) => {
 
 /**
  * Obtém opções de frete (cotação)
- * GET /api/shipping/:subOrderId/options
+ * GET /api/shipping/orders/:subOrderId/options
  */
 export const getShippingOptions = async (req, res, next) => {
   try {
@@ -51,7 +51,7 @@ export const getShippingOptions = async (req, res, next) => {
 
 /**
  * Seleciona transportadora
- * POST /api/shipping/:subOrderId/select
+ * POST /api/shipping/orders/:subOrderId/select
  */
 export const selectShippingOption = async (req, res, next) => {
   try {
@@ -68,7 +68,7 @@ export const selectShippingOption = async (req, res, next) => {
 
 /**
  * Gera etiqueta de envio
- * POST /api/shipping/:subOrderId/label
+ * POST /api/shipping/orders/:subOrderId/label
  */
 export const generateLabel = async (req, res, next) => {
   try {
@@ -84,7 +84,7 @@ export const generateLabel = async (req, res, next) => {
 
 /**
  * Obtém a URL da etiqueta já gerada
- * GET /api/stores/me/orders/:subOrderId/shipping/label
+ * GET /api/shipping/orders/:subOrderId/label
  */
 export const getLabelUrl = async (req, res, next) => {
   try {
