@@ -124,7 +124,7 @@ export const getProductOrThrow = async (productVariantId) => {
     throw createHttpError("Produto não encontrado", 404);
   }
 
-  if (productVariant.product.status === "deleted" || productVariant.product.store?.status === "deleted") {
+  if (productVariant.product.deletedAt !== null || productVariant.product.store?.deletedAt !== null) {
     throw createHttpError("Produto indisponível", 404);
   }
 

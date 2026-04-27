@@ -84,20 +84,15 @@ const ensureContextSpecificRulesOrThrow = async (req) => {
 };
 
 export const authorizeUploadByContext = async (req, res, next) => {
-  try {
     const context = resolveUploadContext(req);
     validateUploadContextOrThrow(context);
     validateRoleForContextOrThrow(context, req.user.role);
     await ensureContextSpecificRulesOrThrow(req);
 
     return next();
-  } catch (error) {
-    return next(error);
-  }
 };
 
 export const uploadImageByContext = async (req, res, next) => {
-  try {
     if (!req.file) {
       throw createHttpError("Nenhuma imagem foi enviada", 400, undefined, "UPLOAD_FILE_MISSING");
     }
@@ -113,7 +108,4 @@ export const uploadImageByContext = async (req, res, next) => {
       mimeType: req.file.mimetype,
       size: req.file.size,
     });
-  } catch (error) {
-    return next(error);
-  }
 };

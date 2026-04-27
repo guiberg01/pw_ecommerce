@@ -133,7 +133,6 @@ const cleanupCreatedProduct = async (productId) => {
 const syncStoreCategoriesFromProducts = async (storeId) => {
   const categories = await Product.distinct("category", {
     store: storeId,
-    status: { $ne: "deleted" },
   });
 
   await Store.findByIdAndUpdate(storeId, { $set: { categories } });
@@ -269,12 +268,10 @@ export const findProductVariantByIdOrThrow = async (variantId) => {
   const variant = await ProductVariant.findOne({ _id: variantId }).populate({
     path: "product",
     select: "name description basePrice mainImageUrl highlighted maxPerPerson status store category",
-    match: { status: { $ne: "deleted" } },
     populate: [
       {
         path: "store",
         select: "name slug owner status",
-        match: { status: { $ne: "deleted" } },
       },
       {
         path: "category",
@@ -293,12 +290,12 @@ export const findProductVariantByIdOrThrow = async (variantId) => {
 export const createStores = async (id, data) => {
   const { name, description, logoUrl, addressId } = data;
   const validAddress = await ensureAddressBelongsToOwnerOrThrow(addressId, id);
-  const existingStore = await Store.findOne({ owner: id, status: { $ne: "deleted" } });
+  const existingStore = await Store.findOne({ owner: id });
   if (existingStore) {
     throw createHttpError("Este seller já possui uma loja", 409, undefined, "STORE_ALREADY_EXISTS");
   }
 
-  const deletedStore = await Store.findOne({ owner: id, status: "deleted" }).sort({ updatedAt: -1 });
+  const deletedStore = await Store.findOne({ owner: id, includeDeleted: true }).sort({ updatedAt: -1 });
 
   if (deletedStore) {
     deletedStore.name = name;
@@ -384,7 +381,7 @@ export const updateStoreForOwner = async (ownerId, data) => {
 };
 
 export const findExistingStoreOrThrow = async (storeId) => {
-  const store = await Store.findOne({ _id: storeId, status: { $ne: "deleted" } });
+  const store = await Store.findOne({ _id: storeId });
 
   if (!store) {
     throw createHttpError("Loja não encontrada", 404, undefined, "STORE_NOT_FOUND");
@@ -408,7 +405,7 @@ export const findActiveStoreByOwnerOrThrow = async (ownerId) => {
 };
 
 export const findStoreByIdOrThrow = async (storeId) => {
-  const store = await Store.findOne({ _id: storeId, status: { $ne: "deleted" } }).populate("owner", "name email role");
+  const store = await Store.findOne({ _id: storeId }).populate("owner", "name email role");
 
   if (!store) {
     throw createHttpError("Loja não encontrada", 404, undefined, "STORE_NOT_FOUND");
@@ -436,7 +433,7 @@ export const listVisibleStores = async ({ categoryId, page, limit } = {}) => {
 };
 
 export const ensureStoreHasNoActiveProducts = async (storeId) => {
-  const hasProduct = await Product.exists({ store: storeId, status: { $ne: "deleted" } });
+  const hasProduct = await Product.exists({ store: storeId });
 
   if (hasProduct) {
     throw createHttpError("Não é possível deletar uma loja que possui produtos", 400, undefined, "STORE_HAS_PRODUCTS");
@@ -444,7 +441,7 @@ export const ensureStoreHasNoActiveProducts = async (storeId) => {
 };
 
 export const softDeleteStore = async (storeId) => {
-  await Store.findByIdAndUpdate(storeId, { status: "deleted" });
+  await Store.findByIdAndUpdate(storeId, { deletedAt: new Date() });
 };
 
 export const createProductForStore = async (storeId, payload) => {
@@ -479,8 +476,7 @@ export const createProductForStore = async (storeId, payload) => {
 };
 
 export const findActiveProductOrThrow = async (productId, { populateStoreOwner = false } = {}) => {
-  // Aqui "active" no nome significa "existente e não deletado" para permitir ações administrativas.
-  const query = Product.findOne({ _id: productId, status: { $ne: "deleted" } });
+  const query = Product.findOne({ _id: productId });
 
   if (populateStoreOwner) {
     query.populate("store", "owner");
@@ -554,7 +550,7 @@ export const updateProductAndPopulate = async (product, payload) => {
 };
 
 export const softDeleteProduct = async (productId) => {
-  const product = await Product.findByIdAndUpdate(productId, { status: "deleted" }, { new: true }).select("store");
+  const product = await Product.findByIdAndUpdate(productId, { deletedAt: new Date() }, { new: true }).select("store");
 
   if (product?.store) {
     await syncStoreCategoriesFromProducts(product.store);

@@ -19,16 +19,17 @@ const couponSchema = new mongoose.Schema(
     discountValue: {
       type: Number,
       required: true,
-      min: [0.01, "O valor do desconto deve ser maior que zero"],
-      validate: {
-        validator: function (value) {
-          if (this.discountType === "percentage") {
-            return value <= 100;
-          }
-          return true;
+      min: [1, "O valor do desconto deve ser maior que zero"],
+      validate:
+        {
+          validator: function (value) {
+            if (this.discountType === "percentage") {
+              return value <= 100;
+            }
+            return true;
+          },
+          message: "Desconto percentual não pode ultrapassar 100%",
         },
-        message: "Desconto percentual não pode ultrapassar 100%",
-      },
     },
     minOrderValue: {
       type: Number,
@@ -103,7 +104,7 @@ const couponSchema = new mongoose.Schema(
   { timestamps: true },
 );
 
-couponSchema.index({ expiresAt: 1 });
+couponSchema.index({ expiresAt: 1 }, { expireAfterSeconds: 0 });
 couponSchema.index({ stores: 1 });
 couponSchema.index({ categories: 1 });
 couponSchema.index({ scope: 1, status: 1 });

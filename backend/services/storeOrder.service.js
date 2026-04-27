@@ -4,7 +4,8 @@ import Payment from "../models/payment.model.js";
 import Shipping from "../models/shipping.model.js";
 import { createHttpError } from "../helpers/httpError.js";
 import { findActiveStoreByOwnerOrThrow } from "./catalog.service.js";
-import { buildPaginationResult, buildPaymentView, groupByOrderId } from "./orderView.helper.js";
+import { buildPaginationResult, buildPaymentView, groupByOrderId } from "../helpers/orderView.helper.js";
+import { subOrderStatuses } from "../constants/subOrderStatuses.js";
 
 const ORDER_SELECT_FIELDS =
   "user status totalPriceProducts totalPaidByCustomer totalShippingPrice totalDiscount shippingAddress createdAt updatedAt";
@@ -83,13 +84,13 @@ const buildSellerOrderSummary = (orders = [], subOrders = []) => {
       shippingTotal: 0,
       itemsCount: 0,
       statusBreakdown: {
-        pending: 0,
-        paid: 0,
-        processing: 0,
-        shipping: 0,
-        delivered: 0,
-        cancelled: 0,
-        failed: 0,
+        [subOrderStatuses.PENDING]: 0,
+        [subOrderStatuses.PAID]: 0,
+        [subOrderStatuses.PROCESSING]: 0,
+        [subOrderStatuses.SHIPPING]: 0,
+        [subOrderStatuses.DELIVERED]: 0,
+        [subOrderStatuses.CANCELLED]: 0,
+        [subOrderStatuses.FAILED]: 0,
       },
     },
   );
@@ -207,13 +208,13 @@ export const listOrdersForSeller = async (
           discountTotal: { $sum: { $ifNull: ["$discountAmount", 0] } },
           shippingTotal: { $sum: { $ifNull: ["$shippingCost", 0] } },
           itemsCount: { $sum: "$itemCount" },
-          pending: { $sum: { $cond: [{ $eq: ["$status", "pending"] }, 1, 0] } },
-          paid: { $sum: { $cond: [{ $eq: ["$status", "paid"] }, 1, 0] } },
-          processing: { $sum: { $cond: [{ $eq: ["$status", "processing"] }, 1, 0] } },
-          shipping: { $sum: { $cond: [{ $eq: ["$status", "shipping"] }, 1, 0] } },
-          delivered: { $sum: { $cond: [{ $eq: ["$status", "delivered"] }, 1, 0] } },
-          cancelled: { $sum: { $cond: [{ $eq: ["$status", "cancelled"] }, 1, 0] } },
-          failed: { $sum: { $cond: [{ $eq: ["$status", "failed"] }, 1, 0] } },
+          pending: { $sum: { $cond: [{ $eq: ["$status", subOrderStatuses.PENDING] }, 1, 0] } },
+          paid: { $sum: { $cond: [{ $eq: ["$status", subOrderStatuses.PAID] }, 1, 0] } },
+          processing: { $sum: { $cond: [{ $eq: ["$status", subOrderStatuses.PROCESSING] }, 1, 0] } },
+          shipping: { $sum: { $cond: [{ $eq: ["$status", subOrderStatuses.SHIPPING] }, 1, 0] } },
+          delivered: { $sum: { $cond: [{ $eq: ["$status", subOrderStatuses.DELIVERED] }, 1, 0] } },
+          cancelled: { $sum: { $cond: [{ $eq: ["$status", subOrderStatuses.CANCELLED] }, 1, 0] } },
+          failed: { $sum: { $cond: [{ $eq: ["$status", subOrderStatuses.FAILED] }, 1, 0] } },
         },
       },
     ]),

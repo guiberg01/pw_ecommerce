@@ -3,6 +3,7 @@ import Product from "../models/product.model.js";
 import Store from "../models/store.model.js";
 import { createHttpError } from "../helpers/httpError.js";
 import { createDocumentWithUniqueSlug, saveDocumentWithUniqueSlug } from "../helpers/slugUnique.helper.js";
+import { categoryStatuses } from "../constants/categoryStatuses.js";
 
 const MAX_SLUG_RETRIES = 5;
 const DEFAULT_PAGE = 1;
@@ -34,7 +35,7 @@ const buildPaginationResult = (items, total, page, limit) => ({
 export const listActiveCategories = async ({ page, limit } = {}) => {
   const pagination = normalizePagination({ page, limit });
   const skip = (pagination.page - 1) * pagination.limit;
-  const filters = { status: "active" };
+  const filters = { status: categoryStatuses.ACTIVE };
 
   const [items, total] = await Promise.all([
     Category.find(filters).sort({ name: 1 }).skip(skip).limit(pagination.limit),
@@ -74,8 +75,14 @@ export const listCategoriesForAdmin = async ({ status, search, page = 1, limit =
 };
 
 export const findCategoryByIdOrThrow = async (categoryId, { includeInactive = false } = {}) => {
-  const statusFilter = includeInactive ? { $ne: "deleted" } : "active";
-  const category = await Category.findOne({ _id: categoryId, status: statusFilter });
+  const filters = { _id: categoryId };
+  const query = Category.findOne(filters);
+  
+  if (includeInactive) {
+    query.setOptions({ includeDeleted: true });
+  }
+
+  const category = await query;
 
   if (!category) {
     throw createHttpError("Categoria não encontrada", 404, undefined, "CATEGORY_NOT_FOUND");
@@ -87,10 +94,11 @@ export const findCategoryByIdOrThrow = async (categoryId, { includeInactive = fa
 export const createCategory = async ({ name }) => {
   const normalizedName = name.trim();
 
-  const deletedCategory = await Category.findOne({ name: normalizedName, status: "deleted" }).sort({ updatedAt: -1 });
+  const deletedCategory = await Category.findOne({ name: normalizedName }).setOptions({ includeDeleted: true }).sort({ updatedAt: -1 });
   if (deletedCategory) {
     deletedCategory.name = normalizedName;
-    deletedCategory.status = "active";
+    deletedCategory.status = categoryStatuses.ACTIVE;
+    deletedCategory.deletedAt = null;
 
     const slugSaved = await saveDocumentWithUniqueSlug({
       document: deletedCategory,
@@ -114,7 +122,7 @@ export const createCategory = async ({ name }) => {
     Model: Category,
     payload: {
       name: normalizedName,
-      status: "active",
+      status: categoryStatuses.ACTIVE,
     },
     sourceValue: normalizedName,
     maxRetries: MAX_SLUG_RETRIES,
@@ -134,15 +142,6 @@ export const createCategory = async ({ name }) => {
 
 export const updateCategoryById = async (categoryId, payload) => {
   const category = await findCategoryByIdOrThrow(categoryId, { includeInactive: true });
-
-  if (payload.status === "deleted") {
-    throw createHttpError(
-      "Use o endpoint de exclusão para deletar categoria",
-      400,
-      undefined,
-      "CATEGORY_DELETE_VIA_UPDATE_FORBIDDEN",
-    );
-  }
 
   if (payload.status !== undefined) {
     category.status = payload.status;
@@ -179,13 +178,13 @@ export const updateCategoryById = async (categoryId, payload) => {
 export const softDeleteCategoryById = async (categoryId) => {
   const category = await findCategoryByIdOrThrow(categoryId, { includeInactive: true });
 
-  if (category.status === "deleted") {
+  if (category.deletedAt !== null) {
     throw createHttpError("Categoria já está deletada", 400, undefined, "CATEGORY_ALREADY_DELETED");
   }
 
   const [activeProductsCount, activeStoresCount] = await Promise.all([
-    Product.countDocuments({ category: category._id, status: { $ne: "deleted" } }),
-    Store.countDocuments({ categories: category._id, status: { $ne: "deleted" } }),
+    Product.countDocuments({ category: category._id }),
+    Store.countDocuments({ categories: category._id }),
   ]);
 
   if (activeProductsCount > 0 || activeStoresCount > 0) {
@@ -200,7 +199,7 @@ export const softDeleteCategoryById = async (categoryId) => {
     );
   }
 
-  category.status = "deleted";
+  category.deletedAt = new Date();
   await category.save();
 
   return category;

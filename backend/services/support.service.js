@@ -272,8 +272,8 @@ const ensureOrderOwnershipForRequesterOrThrow = async (actor, orderId) => {
 const ensureStoreOwnershipForSellerOrThrow = async (actor, storeId) => {
   if (!storeId) return;
 
-  const store = await Store.findById(storeId).select("_id owner status").lean();
-  if (!store || store.status === "deleted") {
+  const store = await Store.findById(storeId).select("_id owner deletedAt").lean();
+  if (!store || store.deletedAt !== null) {
     throw createHttpError("Loja relacionada não encontrada", 404, undefined, "SUPPORT_STORE_NOT_FOUND");
   }
 

@@ -19,17 +19,12 @@ import {
 import { notifyStoreVisitMilestone } from "../services/notification.service.js";
 
 export const allStores = async (req, res, next) => {
-  try {
     const { categoryId, page, limit } = req.validatedQuery ?? {};
     const stores = await listVisibleStores({ categoryId, page, limit });
     return sendSuccess(res, 200, "Lojas listadas com sucesso", stores);
-  } catch (error) {
-    return next(error);
-  }
 };
 
 export const createStore = async (req, res, next) => {
-  try {
     const store = await createStores(req.user._id, req.body);
     const melhorEnvioOnboardingUrl = melhorenvioService.generateAuthorizationUrl(store._id.toString());
 
@@ -37,71 +32,55 @@ export const createStore = async (req, res, next) => {
       ...store.toObject(),
       melhorEnvioOnboardingUrl,
     });
-  } catch (error) {
-    return next(error);
-  }
 };
 
 export const getMyStore = async (req, res, next) => {
-  try {
     const store = await findActiveStoreByOwnerOrThrow(req.user._id);
     return sendSuccess(res, 200, "Loja encontrada com sucesso", store);
-  } catch (error) {
-    return next(error);
-  }
 };
 
 export const getStoreById = async (req, res, next) => {
-  try {
     const { storeId } = req.params;
     const store = await findStoreByIdOrThrow(storeId);
 
     // Melhor esforço: contabiliza visitas sem interromper resposta ao cliente.
-    try {
-      const visitsCount = Number(store.visitsCount ?? 0) + 1;
-      const lastMilestone = Number(store.lastVisitMilestoneNotified ?? 0);
-      const currentMilestone = Math.floor(visitsCount / 50) * 50;
+    const visitsCount = Number(store.visitsCount ?? 0) + 1;
+    const lastMilestone = Number(store.lastVisitMilestoneNotified ?? 0);
+    const currentMilestone = Math.floor(visitsCount / 50) * 50;
 
-      await Store.updateOne(
-        { _id: store._id },
-        {
-          $set: {
-            visitsCount,
-            ...(currentMilestone > 0 && currentMilestone > lastMilestone
-              ? { lastVisitMilestoneNotified: currentMilestone }
-              : {}),
-          },
+    void Store.updateOne(
+      { _id: store._id },
+      {
+        $set: {
+          visitsCount,
+          ...(currentMilestone > 0 && currentMilestone > lastMilestone
+            ? { lastVisitMilestoneNotified: currentMilestone }
+            : {}),
         },
-      );
-
-      if (currentMilestone > 0 && currentMilestone > lastMilestone) {
-        await notifyStoreVisitMilestone({
-          storeId: store._id,
-          ownerId: store.owner?._id ?? store.owner,
-          visitsCount: currentMilestone,
-        });
-      }
-    } catch {
-      // Ignore falhas de telemetria de visita para não degradar endpoint público.
-    }
+      },
+    )
+      .then(async () => {
+        if (currentMilestone > 0 && currentMilestone > lastMilestone) {
+          await notifyStoreVisitMilestone({
+            storeId: store._id,
+            ownerId: store.owner?._id ?? store.owner,
+            visitsCount: currentMilestone,
+          });
+        }
+      })
+      .catch(() => {
+        // Ignore falhas de telemetria de visita para não degradar endpoint público.
+      });
 
     return sendSuccess(res, 200, "Loja encontrada com sucesso", store);
-  } catch (error) {
-    return next(error);
-  }
 };
 
 export const updateMyStore = async (req, res, next) => {
-  try {
     const store = await updateStoreForOwner(req.user._id, req.body);
     return sendSuccess(res, 200, "Loja atualizada com sucesso", store);
-  } catch (error) {
-    return next(error);
-  }
 };
 
 export const deleteMyStore = async (req, res, next) => {
-  try {
     const { storeId } = req.params;
     const store = await findStoreByIdOrThrow(storeId);
 
@@ -113,34 +92,19 @@ export const deleteMyStore = async (req, res, next) => {
     await softDeleteStore(store._id);
 
     return sendSuccess(res, 200, "Loja deletada com sucesso");
-  } catch (error) {
-    return next(error);
-  }
 };
 
 export const createMyStoreStripeOnboardingLink = async (req, res, next) => {
-  try {
     const onboarding = await createStripeOnboardingLinkForStoreOwner(req.user._id, req.body);
     return sendSuccess(res, 200, "Link de onboarding Stripe gerado com sucesso", onboarding);
-  } catch (error) {
-    return next(error);
-  }
 };
 
 export const getMyStoreStripeConnectStatus = async (req, res, next) => {
-  try {
     const status = await getStripeConnectStatusForStoreOwner(req.user._id);
     return sendSuccess(res, 200, "Status da conta Stripe obtido com sucesso", status);
-  } catch (error) {
-    return next(error);
-  }
 };
 
 export const postMyStoreStripePayoutDispatch = async (req, res, next) => {
-  try {
     const result = await dispatchPendingPayoutTransfersForStoreOwner(req.user._id);
     return sendSuccess(res, 200, "Transferências pendentes disparadas com sucesso", result);
-  } catch (error) {
-    return next(error);
-  }
 };

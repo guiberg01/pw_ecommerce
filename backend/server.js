@@ -1,8 +1,11 @@
 import express from "express";
 import dotenv from "dotenv";
 import cookieParser from "cookie-parser";
+import cors from "cors";
+import helmet from "helmet";
 import { createHttpError } from "./helpers/httpError.js";
 import { errorHandler } from "./middleware/errorHandler.middleware.js";
+import { createRateLimit } from "./middleware/rateLimit.middleware.js";
 
 import dns from "dns";
 
@@ -29,7 +32,6 @@ import supportRoutes from "./routes/support.route.js";
 import { connectDB, disconnectDB } from "./config/db.js";
 import { disconnectRedis } from "./config/redis.js";
 import { ensureUploadDirectoryExists, getUploadDirectoryPath } from "./config/upload.js";
-import { startCouponExpirationScheduler } from "./jobs/couponExpiration.job.js";
 
 dotenv.config();
 
@@ -63,7 +65,6 @@ const app = express();
 const PORT = process.env.PORT || 3980;
 let httpServer;
 let shuttingDown = false;
-let stopCouponExpirationScheduler;
 
 const resolveTrustProxyValue = () => {
   const rawValue = process.env.TRUST_PROXY;
@@ -87,6 +88,27 @@ const resolveTrustProxyValue = () => {
 
 app.set("trust proxy", resolveTrustProxyValue());
 
+const corsOptions = {
+  origin: function (origin, callback) {
+    const allowedOrigins = process.env.ALLOWED_ORIGINS ? process.env.ALLOWED_ORIGINS.split(',').map(s => s.trim()) : [];
+    if (!origin || allowedOrigins.length === 0 || allowedOrigins.includes(origin)) {
+      callback(null, true);
+    } else {
+      callback(new Error('Not allowed by CORS'));
+    }
+  },
+  credentials: true
+};
+
+const globalRateLimit = createRateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 100, // limit each IP to 100 requests per windowMs
+  scope: 'global'
+});
+
+app.use(helmet());
+app.use(cors(corsOptions));
+
 const isRawBodyWebhookRequest = (req) => {
   const originalUrl = String(req.originalUrl ?? "");
   const url = String(req.url ?? "");
@@ -109,6 +131,7 @@ app.use(
   }),
 );
 app.use(cookieParser());
+app.use(globalRateLimit);
 app.use("/uploads", express.static(getUploadDirectoryPath()));
 
 app.use("/api/auth", authRoutes);
@@ -142,7 +165,6 @@ const bootstrap = async () => {
     validateRequiredEnv();
     await ensureUploadDirectoryExists();
     await connectDB();
-    stopCouponExpirationScheduler = startCouponExpirationScheduler();
 
     httpServer = app.listen(PORT, () => {
       console.log(`Server rodando em: http://localhost:${PORT}`);
@@ -160,10 +182,6 @@ const gracefulShutdown = async (signal) => {
   console.log(`Recebido ${signal}. Encerrando aplicação...`);
 
   try {
-    if (stopCouponExpirationScheduler) {
-      stopCouponExpirationScheduler();
-    }
-
     if (httpServer) {
       await new Promise((resolve, reject) => {
         httpServer.close((error) => {

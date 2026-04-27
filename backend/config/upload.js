@@ -1,15 +1,16 @@
 import path from "path";
 import crypto from "crypto";
 import fs from "fs/promises";
+import os from "os";
 import multer from "multer";
 import { createHttpError } from "../helpers/httpError.js";
 
-const UPLOADS_RELATIVE_PATH = path.join("backend", "uploads");
+const UPLOADS_RELATIVE_PATH = path.join(os.tmpdir(), "uploads");
 const MAX_IMAGE_SIZE_MB = Number(process.env.UPLOAD_MAX_IMAGE_MB ?? 5);
 const MAX_IMAGE_SIZE_BYTES = Math.max(1, MAX_IMAGE_SIZE_MB) * 1024 * 1024;
 const ALLOWED_IMAGE_MIME_TYPES = new Set(["image/jpeg", "image/png", "image/webp", "image/gif"]);
 
-export const getUploadDirectoryPath = () => path.join(process.cwd(), UPLOADS_RELATIVE_PATH);
+export const getUploadDirectoryPath = () => UPLOADS_RELATIVE_PATH;
 
 export const ensureUploadDirectoryExists = async () => {
   await fs.mkdir(getUploadDirectoryPath(), { recursive: true });

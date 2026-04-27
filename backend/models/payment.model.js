@@ -1,4 +1,5 @@
 import mongoose from "mongoose";
+import { paymentStatuses } from "../constants/paymentStatuses.js";
 
 const paymentMethodSnapshotSchema = new mongoose.Schema(
   {
@@ -78,8 +79,8 @@ const paymentSchema = new mongoose.Schema(
     },
     status: {
       type: String,
-      enum: ["pending", "succeeded", "failed", "requires_action", "refunded", "partially_refunded"],
-      default: "pending",
+      enum: Object.values(paymentStatuses),
+      default: paymentStatuses.PENDING,
       index: true,
     },
     events: {

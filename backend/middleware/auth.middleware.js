@@ -1,6 +1,7 @@
 import jwt from "jsonwebtoken";
 import User from "../models/user.model.js";
 import { createHttpError } from "../helpers/httpError.js";
+import { isAccessTokenBlocklisted } from "../helpers/redisAuth.helper.js";
 
 const resolveUserFromAccessToken = async (accessToken) => {
   if (!accessToken) return null;
@@ -21,11 +22,20 @@ const isAuthTokenError = (error) => {
 
 export const isLoggedIn = async (req, res, next) => {
   try {
-    if (!req.cookies.accessToken) {
+    const accessToken = req.cookies.accessToken;
+
+    if (!accessToken) {
       throw createHttpError("Não autorizado - Token inválido ou ausente", 401, undefined, "AUTH_TOKEN_MISSING");
     }
 
-    const user = await resolveUserFromAccessToken(req.cookies.accessToken);
+    const decoded = jwt.verify(accessToken, process.env.ACCESS_TOKEN);
+    const isBlocklisted = await isAccessTokenBlocklisted({ token: accessToken, jti: decoded.jti });
+
+    if (isBlocklisted) {
+      throw createHttpError("Não autorizado - Sessão inválida", 401, undefined, "AUTH_TOKEN_REVOKED");
+    }
+
+    const user = await User.findById(decoded.userId).select("-password");
 
     if (!user) {
       throw createHttpError("Não autorizado - Usuário não encontrado", 401, undefined, "AUTH_USER_NOT_FOUND");

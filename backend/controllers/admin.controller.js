@@ -11,20 +11,19 @@ import {
 import Store from "../models/store.model.js";
 
 export const allStoresForAdmin = async (req, res, next) => {
-  try {
     const { page = 1, limit = 20 } = req.validatedQuery ?? {};
     const safePage = Number.isFinite(Number(page)) ? Math.max(1, Number(page)) : 1;
     const safeLimit = Number.isFinite(Number(limit)) ? Math.min(100, Math.max(1, Number(limit))) : 20;
     const skip = (safePage - 1) * safeLimit;
 
     const [stores, total, myStore] = await Promise.all([
-      Store.find({ status: { $ne: "deleted" } })
+      Store.find({})
         .sort({ createdAt: -1 })
         .skip(skip)
         .limit(safeLimit)
         .populate("owner", "name email role"),
-      Store.countDocuments({ status: { $ne: "deleted" } }),
-      Store.findOne({ owner: req.user._id, status: { $ne: "deleted" } }).select("_id"),
+      Store.countDocuments({}),
+      Store.findOne({ owner: req.user._id }).select("_id"),
     ]);
 
     return sendSuccess(res, 200, "Lojas listadas com sucesso", {
@@ -37,13 +36,9 @@ export const allStoresForAdmin = async (req, res, next) => {
         totalPages: Math.ceil(total / safeLimit) || 1,
       },
     });
-  } catch (error) {
-    return next(error);
-  }
 };
 
 export const createProductForStoreByAdmin = async (req, res, next) => {
-  try {
     const { storeId } = req.params;
     const { name, description, category, highlighted, maxPerPerson, mainVariant, variants } = req.body;
 
@@ -60,50 +55,34 @@ export const createProductForStoreByAdmin = async (req, res, next) => {
     });
 
     return sendSuccess(res, 201, "Produto criado com sucesso", productWithStore);
-  } catch (error) {
-    return next(error);
-  }
 };
 
 export const deleteStoreByAdmin = async (req, res, next) => {
-  try {
     const { storeId } = req.params;
     await findExistingStoreOrThrow(storeId);
     await ensureStoreHasNoActiveProducts(storeId);
     await softDeleteStore(storeId);
 
     return sendSuccess(res, 200, "Loja deletada com sucesso");
-  } catch (error) {
-    return next(error);
-  }
 };
 
 export const updateProductByAdmin = async (req, res, next) => {
-  try {
     const { id } = req.params;
     const product = await findActiveProductOrThrow(id);
     const updatedProduct = await updateProductAndPopulate(product, req.body);
 
     return sendSuccess(res, 200, "Produto atualizado com sucesso", updatedProduct);
-  } catch (error) {
-    return next(error);
-  }
 };
 
 export const deleteProductByAdmin = async (req, res, next) => {
-  try {
     const { id } = req.params;
     await findActiveProductOrThrow(id);
     await softDeleteProduct(id);
 
     return sendSuccess(res, 200, "Produto removido com sucesso");
-  } catch (error) {
-    return next(error);
-  }
 };
 
 export const updateStoreStatusByAdmin = async (req, res, next) => {
-  try {
     const { storeId } = req.params;
     const { status } = req.body;
 
@@ -113,7 +92,4 @@ export const updateStoreStatusByAdmin = async (req, res, next) => {
     await store.save();
 
     return sendSuccess(res, 200, "Status da loja atualizado com sucesso", store);
-  } catch (error) {
-    return next(error);
-  }
 };

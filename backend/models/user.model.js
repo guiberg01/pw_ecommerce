@@ -1,5 +1,7 @@
 import mongoose from "mongoose";
-import bcrypt from "bcryptjs";
+import bcrypt from "bcrypt";
+import { accountStatuses } from "../constants/accountStatuses.js";
+import { useSoftDelete } from "./plugins/softDelete.plugin.js";
 
 const userSchema = new mongoose.Schema(
   {
@@ -28,6 +30,11 @@ const userSchema = new mongoose.Schema(
       type: String,
       default: null,
       trim: true,
+      set: (value) => {
+        if (value == null) return null;
+        const normalized = String(value).trim();
+        return normalized.length === 0 ? null : normalized;
+      },
     },
     stripeCustomerId: {
       type: String,
@@ -41,8 +48,8 @@ const userSchema = new mongoose.Schema(
     },
     status: {
       type: String,
-      enum: ["active", "suspended", "blocked", "pending"],
-      default: "active",
+      enum: Object.values(accountStatuses),
+      default: accountStatuses.ACTIVE,
       index: true,
     },
     suspendedSince: {
@@ -93,6 +100,8 @@ userSchema.virtual("order", {
   localField: "_id",
   foreignField: "user",
 });
+
+useSoftDelete(userSchema);
 
 const User = mongoose.model("User", userSchema);
 

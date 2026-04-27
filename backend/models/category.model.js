@@ -1,5 +1,6 @@
 import mongoose from "mongoose";
 import { slugify } from "../helpers/slugUnique.helper.js";
+import { useSoftDelete } from "./plugins/softDelete.plugin.js";
 
 const categorySchema = new mongoose.Schema(
   {
@@ -16,7 +17,7 @@ const categorySchema = new mongoose.Schema(
     },
     status: {
       type: String,
-      enum: ["active", "inactive", "deleted"],
+      enum: ["active", "inactive"],
       default: "active",
     },
   },
@@ -29,11 +30,13 @@ categorySchema.pre("validate", function () {
   }
 });
 
+useSoftDelete(categorySchema);
+
 categorySchema.index(
   { slug: 1 },
   {
     unique: true,
-    partialFilterExpression: { status: { $ne: "deleted" } },
+    partialFilterExpression: { deletedAt: null },
   },
 );
 

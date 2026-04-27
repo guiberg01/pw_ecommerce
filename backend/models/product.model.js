@@ -1,4 +1,5 @@
 import mongoose from "mongoose";
+import { useSoftDelete } from "./plugins/softDelete.plugin.js";
 
 const productSchema = new mongoose.Schema(
   {
@@ -44,7 +45,7 @@ const productSchema = new mongoose.Schema(
     },
     status: {
       type: String,
-      enum: ["active", "blocked", "deleted"],
+      enum: ["active", "blocked"],
       default: "active",
     },
     rating: {
@@ -89,6 +90,8 @@ productSchema.virtual("rating.average").get(function () {
   if (!count) return 0;
   return Math.round((sum / count) * 100) / 100;
 });
+
+useSoftDelete(productSchema);
 
 productSchema.index({ status: 1, store: 1, category: 1 });
 

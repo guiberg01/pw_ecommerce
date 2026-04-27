@@ -1,4 +1,5 @@
 import mongoose from "mongoose";
+import { payoutStatuses } from "../constants/payoutStatuses.js";
 
 const payoutSchema = new mongoose.Schema(
   {
@@ -33,8 +34,8 @@ const payoutSchema = new mongoose.Schema(
     },
     status: {
       type: String,
-      enum: ["pending", "in_transit", "paid", "failed", "cancelled"],
-      default: "pending",
+      enum: Object.values(payoutStatuses),
+      default: payoutStatuses.PENDING,
       index: true,
     },
     failureMessage: {

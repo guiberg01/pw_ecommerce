@@ -1,4 +1,5 @@
 import mongoose from "mongoose";
+import { shippingStatuses } from "../constants/shippingStatuses.js";
 
 const shippingSchema = new mongoose.Schema(
   {
@@ -54,8 +55,8 @@ const shippingSchema = new mongoose.Schema(
     },
     status: {
       type: String,
-      enum: ["pending", "posted", "in_transit", "delivered", "failed", "cancelled"],
-      default: "pending",
+      enum: Object.values(shippingStatuses),
+      default: shippingStatuses.PENDING,
       index: true,
     },
     history: {

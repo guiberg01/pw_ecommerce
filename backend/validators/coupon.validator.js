@@ -29,20 +29,20 @@ export const createCouponSchema = z
     expiresAt: z.coerce
       .date()
       .refine((date) => date > new Date(), {
-        message: "Data de expiração deve ser no futuro",
+        error: "Data de expiração deve ser no futuro",
       })
       .optional(),
     products: z.array(mongoIdSchema).optional(),
     stores: z.array(mongoIdSchema).optional(),
     categories: z.array(mongoIdSchema).optional(),
-    status: z.enum(["active", "inactive", "expired", "sold-out", "deleted"]).optional(),
+    status: z.enum(["active", "inactive", "expired", "sold-out"]).optional(),
   })
   .superRefine((data, ctx) => {
     if (data.discountType === "percentage" && data.discountValue > 100) {
       ctx.addIssue({
         code: "custom",
         path: ["discountValue"],
-        message: "Desconto percentual não pode ultrapassar 100%",
+        error: "Desconto percentual não pode ultrapassar 100%",
       });
     }
 
@@ -54,7 +54,7 @@ export const createCouponSchema = z
       ctx.addIssue({
         code: "custom",
         path: ["maxUsesPerUser"],
-        message: "Uso máximo por usuário não pode ser maior que o uso máximo total",
+        error: "Uso máximo por usuário não pode ser maior que o uso máximo total",
       });
     }
   });

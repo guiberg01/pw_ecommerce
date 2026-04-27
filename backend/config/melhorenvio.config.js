@@ -50,7 +50,7 @@ const MELHOR_ENVIO_CONFIG = {
 
   // Timeouts e retry policy
   httpClient: {
-    timeout: 30000, // 30s
+    timeout: 8000, // 8s
     maxRetries: 3,
     retryDelay: 1000, // 1s
   },
@@ -69,9 +69,7 @@ const MELHOR_ENVIO_CONFIG = {
   // Configuração de webhook
   webhook: {
     // URL callback que o ME vai chamar
-    callbackUrl:
-      process.env.MELHOR_ENVIO_WEBHOOK_URL ||
-      "https://90a9-2804-7f0-3c8-1a12-37c7-8978-8960-b19f.ngrok-free.app/api/webhooks/melhorenvio/events",
+    callbackUrl: process.env.MELHOR_ENVIO_WEBHOOK_URL,
     // Secret compartilhado para validar HMAC-SHA256
     secret: process.env.MELHOR_ENVIO_WEBHOOK_SECRET,
     // Timeout para resposta: 6 segundos
