@@ -2,9 +2,15 @@ import Stripe from "stripe";
 import Store from "../models/store.model.js";
 import { createHttpError } from "../helpers/httpError.js";
 import { dispatchPendingPayoutTransfersForStore } from "./checkout.service.js";
+import { releaseRedisLock, waitAndAcquireRedisLock } from "../helpers/redisLock.helper.js";
 
-const stripeClient = process.env.STRIPE_SECRET_KEY ? new Stripe(process.env.STRIPE_SECRET_KEY) : null;
-const inFlightStripeAccountProvisionByStore = new Map();
+const stripeClient = process.env.STRIPE_SECRET_KEY
+  ? new Stripe(process.env.STRIPE_SECRET_KEY, {
+      apiVersion: "2024-04-10",
+    })
+  : null;
+const STRIPE_CONNECT_PROVISION_LOCK_TTL_MS = 15_000;
+const STRIPE_CONNECT_PROVISION_WAIT_TIMEOUT_MS = 10_000;
 
 const getStripeClientOrThrow = () => {
   if (!stripeClient) {
@@ -15,7 +21,7 @@ const getStripeClientOrThrow = () => {
 };
 
 const findStoreByOwnerOrThrow = async (ownerId) => {
-  const store = await Store.findOne({ owner: ownerId, status: { $ne: "deleted" } });
+  const store = await Store.findOne({ owner: ownerId });
 
   if (!store) {
     throw createHttpError("Loja não encontrada", 404, undefined, "STORE_NOT_FOUND");
@@ -30,11 +36,23 @@ const ensureStripeAccountForStore = async (store) => {
   }
 
   const storeKey = store._id.toString();
-  if (inFlightStripeAccountProvisionByStore.has(storeKey)) {
-    return inFlightStripeAccountProvisionByStore.get(storeKey);
+  const lockKey = `locks:stripe:connect:account:${storeKey}`;
+  const lockToken = await waitAndAcquireRedisLock({
+    key: lockKey,
+    ttlMs: STRIPE_CONNECT_PROVISION_LOCK_TTL_MS,
+    waitTimeoutMs: STRIPE_CONNECT_PROVISION_WAIT_TIMEOUT_MS,
+  });
+
+  if (!lockToken) {
+    throw createHttpError(
+      "Provisionamento Stripe em andamento. Tente novamente em instantes",
+      409,
+      undefined,
+      "STRIPE_CONNECT_PROVISION_LOCK_TIMEOUT",
+    );
   }
 
-  const accountProvisionPromise = (async () => {
+  try {
     const freshStore = await Store.findById(store._id).select("stripeConnectId owner");
     if (!freshStore) {
       throw createHttpError("Loja não encontrada", 404, undefined, "STORE_NOT_FOUND");
@@ -77,14 +95,8 @@ const ensureStripeAccountForStore = async (store) => {
     }
 
     return account.id;
-  })();
-
-  inFlightStripeAccountProvisionByStore.set(storeKey, accountProvisionPromise);
-
-  try {
-    return await accountProvisionPromise;
   } finally {
-    inFlightStripeAccountProvisionByStore.delete(storeKey);
+    await releaseRedisLock({ key: lockKey, token: lockToken });
   }
 };
 

@@ -2,6 +2,10 @@ import axios from "axios";
 import MELHOR_ENVIO_CONFIG from "../config/melhorenvio.config.js";
 import MelhorEnvioAuth from "../models/melhorEnvioAuth.model.js";
 import { createHttpError } from "../helpers/httpError.js";
+import { releaseRedisLock, waitAndAcquireRedisLock } from "../helpers/redisLock.helper.js";
+
+const MELHOR_ENVIO_REFRESH_LOCK_TTL_MS = 12_000;
+const MELHOR_ENVIO_REFRESH_LOCK_WAIT_MS = 8_000;
 
 /**
  * Serviço HTTP client para API MelhorEnvio
@@ -127,7 +131,25 @@ class MelhorEnvioService {
   /**
    * Renova access token usando refresh token
    */
-  async refreshAccessToken(refreshToken) {
+  async refreshAccessToken(refreshToken, { storeId } = {}) {
+    const lockKey = storeId ? `locks:melhorenvio:refresh:${storeId}` : null;
+    const lockToken = lockKey
+      ? await waitAndAcquireRedisLock({
+          key: lockKey,
+          ttlMs: MELHOR_ENVIO_REFRESH_LOCK_TTL_MS,
+          waitTimeoutMs: MELHOR_ENVIO_REFRESH_LOCK_WAIT_MS,
+        })
+      : null;
+
+    if (lockKey && !lockToken) {
+      throw createHttpError(
+        "Renovação de token MelhorEnvio em andamento. Tente novamente em instantes",
+        409,
+        undefined,
+        "ME_REFRESH_LOCK_TIMEOUT",
+      );
+    }
+
     try {
       const axiosInstance = this.createAxiosInstance();
       const response = await axiosInstance.post(MELHOR_ENVIO_CONFIG.endpoints.refreshToken, {
@@ -149,6 +171,10 @@ class MelhorEnvioService {
         error.response?.data || error.message,
         "ME_REFRESH_FAILED",
       );
+    } finally {
+      if (lockKey && lockToken) {
+        await releaseRedisLock({ key: lockKey, token: lockToken });
+      }
     }
   }
 
@@ -173,7 +199,7 @@ class MelhorEnvioService {
     // Renovar se expira em menos de 5 minutos
     const expiresIn = auth.expiresAt.getTime() - Date.now();
     if (expiresIn < 5 * 60 * 1000) {
-      const newTokens = await this.refreshAccessToken(auth.refreshToken);
+      const newTokens = await this.refreshAccessToken(auth.refreshToken, { storeId: auth.store.toString() });
       auth.accessToken = newTokens.accessToken;
       auth.refreshToken = newTokens.refreshToken;
       auth.expiresAt = new Date(Date.now() + newTokens.expiresIn * 1000);
@@ -191,25 +217,7 @@ class MelhorEnvioService {
   async calculateShipping(storeId, payload) {
     const token = await this.ensureValidToken(storeId);
     let axiosInstance = this.createAxiosInstance(token);
-    const configuredEndpoint = MELHOR_ENVIO_CONFIG.endpoints.calculateShipping;
-    const endpointCandidates = [configuredEndpoint];
-
-    const legacyCandidate = configuredEndpoint.includes("/api/v2/me/")
-      ? configuredEndpoint.replace("/api/v2/me/", "/api/")
-      : configuredEndpoint.replace("/api/", "/api/v2/me/");
-
-    if (legacyCandidate && !endpointCandidates.includes(legacyCandidate)) {
-      endpointCandidates.push(legacyCandidate);
-    }
-
-    // Alguns apps usam o endpoint v2 sem "/me".
-    // Mantemos compatibilidade testando essa variação também.
-    const v2NoMeCandidate = configuredEndpoint
-      .replace("/api/v2/me/", "/api/v2/")
-      .replace("/api/me/", "/api/");
-    if (v2NoMeCandidate && !endpointCandidates.includes(v2NoMeCandidate)) {
-      endpointCandidates.push(v2NoMeCandidate);
-    }
+    const endpointCandidates = [MELHOR_ENVIO_CONFIG.endpoints.calculateShipping].filter(Boolean);
 
     const isUnauthorizedStatus = (status) => [401, 403].includes(Number(status));
 
@@ -266,7 +274,7 @@ class MelhorEnvioService {
       const auth = await MelhorEnvioAuth.findOne({ store: storeId, isActive: true });
       if (auth?.refreshToken) {
         try {
-          const refreshedTokens = await this.refreshAccessToken(auth.refreshToken);
+          const refreshedTokens = await this.refreshAccessToken(auth.refreshToken, { storeId: auth.store.toString() });
           auth.accessToken = refreshedTokens.accessToken;
           auth.refreshToken = refreshedTokens.refreshToken;
           auth.expiresAt = new Date(Date.now() + Number(refreshedTokens.expiresIn ?? 0) * 1000);
@@ -359,17 +367,7 @@ class MelhorEnvioService {
       };
     };
 
-    const configuredEndpoint = MELHOR_ENVIO_CONFIG.endpoints.createShippingLabel;
-    const endpointCandidates = [
-      configuredEndpoint,
-      "/api/v2/me/cart",
-      "/api/v2/me/shipment/checkout",
-      "/api/v2/me/shipment/generate",
-      "/api/v2/me/shipment",
-      "/api/v2/shipment",
-      "/api/shipment",
-    ];
-    const uniqueCandidates = Array.from(new Set(endpointCandidates.filter(Boolean)));
+    const endpointCandidates = [MELHOR_ENVIO_CONFIG.endpoints.createShippingLabel].filter(Boolean);
 
     const isUnauthorizedStatus = (status) => [401, 403].includes(Number(status));
 
@@ -378,7 +376,7 @@ class MelhorEnvioService {
       let unauthorizedError = null;
       const invalidResponses = [];
 
-      for (const endpoint of uniqueCandidates) {
+      for (const endpoint of endpointCandidates) {
         try {
           const response = await this.runWithRetry("createShippingLabel", () => axiosInstance.post(endpoint, payload));
           const normalized = normalizeLabelPayload(response.data);
@@ -438,7 +436,7 @@ class MelhorEnvioService {
       const auth = await MelhorEnvioAuth.findOne({ store: storeId, isActive: true });
       if (auth?.refreshToken) {
         try {
-          const refreshedTokens = await this.refreshAccessToken(auth.refreshToken);
+          const refreshedTokens = await this.refreshAccessToken(auth.refreshToken, { storeId: auth.store.toString() });
           auth.accessToken = refreshedTokens.accessToken;
           auth.refreshToken = refreshedTokens.refreshToken;
           auth.expiresAt = new Date(Date.now() + Number(refreshedTokens.expiresIn ?? 0) * 1000);
@@ -456,7 +454,7 @@ class MelhorEnvioService {
               502,
               {
                 providerError: secondAttempt.error?.response?.data || secondAttempt.error?.message,
-                attemptedEndpoints: uniqueCandidates,
+                attemptedEndpoints: endpointCandidates,
                 environment: MELHOR_ENVIO_CONFIG.environment,
                 configuredScope: String(MELHOR_ENVIO_CONFIG.oauth.scope ?? "").trim(),
               },
@@ -489,7 +487,7 @@ class MelhorEnvioService {
         502,
         {
           providerError: firstAttempt.error?.response?.data || firstAttempt.error?.message,
-          attemptedEndpoints: uniqueCandidates,
+          attemptedEndpoints: endpointCandidates,
           environment: MELHOR_ENVIO_CONFIG.environment,
           configuredScope: String(MELHOR_ENVIO_CONFIG.oauth.scope ?? "").trim(),
         },
@@ -503,7 +501,7 @@ class MelhorEnvioService {
       {
         providerError: firstAttempt.error?.response?.data || firstAttempt.error?.message,
         invalidResponses: firstAttempt.invalidResponses ?? [],
-        attemptedEndpoints: uniqueCandidates,
+        attemptedEndpoints: endpointCandidates,
         environment: MELHOR_ENVIO_CONFIG.environment,
       },
       "ME_CREATE_LABEL_FAILED",
