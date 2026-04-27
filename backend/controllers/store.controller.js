@@ -13,6 +13,7 @@ import {
 } from "../services/catalog.service.js";
 import {
   createStripeOnboardingLinkForStoreOwner,
+  dispatchPendingPayoutTransfersForStoreOwner,
   getStripeConnectStatusForStoreOwner,
 } from "../services/stripeConnect.service.js";
 import { notifyStoreVisitMilestone } from "../services/notification.service.js";
@@ -130,6 +131,15 @@ export const getMyStoreStripeConnectStatus = async (req, res, next) => {
   try {
     const status = await getStripeConnectStatusForStoreOwner(req.user._id);
     return sendSuccess(res, 200, "Status da conta Stripe obtido com sucesso", status);
+  } catch (error) {
+    return next(error);
+  }
+};
+
+export const postMyStoreStripePayoutDispatch = async (req, res, next) => {
+  try {
+    const result = await dispatchPendingPayoutTransfersForStoreOwner(req.user._id);
+    return sendSuccess(res, 200, "Transferências pendentes disparadas com sucesso", result);
   } catch (error) {
     return next(error);
   }

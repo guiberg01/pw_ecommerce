@@ -26,7 +26,16 @@ const supportStatusSchema = z.enum([
   "closed",
 ]);
 
-const supportAttachmentsSchema = z.array(z.string().trim().url("URL de anexo inválida")).max(5).optional().default([]);
+const supportAttachmentsSchema = z
+  .array(
+    z
+      .string()
+      .trim()
+      .pipe(z.url({ error: "URL de anexo inválida" })),
+  )
+  .max(5)
+  .optional()
+  .default([]);
 
 export const supportTicketIdParamSchema = z.object({
   id: mongoIdSchema,

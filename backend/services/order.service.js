@@ -13,8 +13,11 @@ const tryAutoReconcilePendingOrderPayment = async ({ orderId, userId, status }) 
   try {
     await reconcileCheckoutOrderPaymentForUser(userId, orderId);
     return true;
-  } catch {
+  } catch (error) {
     // Reconciliação é fallback: erros não devem bloquear a consulta do pedido.
+    console.warn(
+      `[Order] Falha ao reconciliar pagamento pendente (orderId=${orderId}, userId=${userId}): ${error?.message ?? "erro desconhecido"}`,
+    );
     return false;
   }
 };

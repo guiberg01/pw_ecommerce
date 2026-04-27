@@ -128,10 +128,6 @@ export const getStripeConnectStatusForStoreOwner = async (ownerId) => {
   const stripe = getStripeClientOrThrow();
   const account = await stripe.accounts.retrieve(store.stripeConnectId);
 
-  if (account.charges_enabled && account.payouts_enabled) {
-    await dispatchPendingPayoutTransfersForStore(store._id);
-  }
-
   return {
     storeId: store._id,
     stripeConnectId: store.stripeConnectId,
@@ -142,5 +138,15 @@ export const getStripeConnectStatusForStoreOwner = async (ownerId) => {
     currentlyDue: account.requirements?.currently_due ?? [],
     pendingVerification: account.requirements?.pending_verification ?? [],
     disabledReason: account.requirements?.disabled_reason ?? null,
+  };
+};
+
+export const dispatchPendingPayoutTransfersForStoreOwner = async (ownerId) => {
+  const store = await findStoreByOwnerOrThrow(ownerId);
+  await dispatchPendingPayoutTransfersForStore(store._id);
+
+  return {
+    storeId: store._id,
+    dispatched: true,
   };
 };

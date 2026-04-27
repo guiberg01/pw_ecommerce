@@ -25,15 +25,15 @@ router.get("/auth/callback", validateQuery(shippingOAuthCallbackQuerySchema), oa
 
 /**
  * Rotas de shipping (autenticadas como seller)
- * Padrão: todos os endpoints de shipping sob /api/stores/me/orders/:subOrderId/shipping
+ * Padrão real (mount em /api/shipping): /api/shipping/orders/:subOrderId/*
  */
 
 /**
- * GET /api/stores/me/orders/:subOrderId/shipping/options
+ * GET /api/shipping/orders/:subOrderId/options
  * Obtém opções de frete para um subOrder
  */
 router.get(
-  "/orders/:subOrderId/shipping/options",
+  "/orders/:subOrderId/options",
   isLoggedIn,
   isSeller,
   validateParams(shippingSubOrderParamSchema),
@@ -42,11 +42,11 @@ router.get(
 );
 
 /**
- * POST /api/stores/me/orders/:subOrderId/shipping/select
+ * POST /api/shipping/orders/:subOrderId/select
  * Seleciona transportadora
  */
 router.post(
-  "/orders/:subOrderId/shipping/select",
+  "/orders/:subOrderId/select",
   isLoggedIn,
   isSeller,
   validateParams(shippingSubOrderParamSchema),
@@ -55,11 +55,11 @@ router.post(
 );
 
 /**
- * POST /api/stores/me/orders/:subOrderId/shipping/label
+ * POST /api/shipping/orders/:subOrderId/label
  * Gera etiqueta no MelhorEnvio
  */
 router.post(
-  "/orders/:subOrderId/shipping/label",
+  "/orders/:subOrderId/label",
   isLoggedIn,
   isSeller,
   validateParams(shippingSubOrderParamSchema),
@@ -67,11 +67,11 @@ router.post(
 );
 
 /**
- * GET /api/stores/me/orders/:subOrderId/shipping/label
+ * GET /api/shipping/orders/:subOrderId/label
  * Retorna a URL da etiqueta já gerada
  */
 router.get(
-  "/orders/:subOrderId/shipping/label",
+  "/orders/:subOrderId/label",
   isLoggedIn,
   isSeller,
   validateParams(shippingSubOrderParamSchema),
