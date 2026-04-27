@@ -13,6 +13,12 @@ import CouponUsage from "../models/couponUsage.model.js";
 import Payout from "../models/payout.model.js";
 import Store from "../models/store.model.js";
 import { createHttpError } from "../helpers/httpError.js";
+import { accountStatuses } from "../constants/accountStatuses.js";
+import { orderStatuses } from "../constants/orderStatuses.js";
+import { paymentStatuses } from "../constants/paymentStatuses.js";
+import { payoutStatuses } from "../constants/payoutStatuses.js";
+import { shippingStatuses } from "../constants/shippingStatuses.js";
+import { subOrderStatuses } from "../constants/subOrderStatuses.js";
 import melhorenvioService from "./melhorenvio.service.js";
 import shippingService from "./shipping.service.js";
 import { notifyOrderFailedOrCancelled, notifyOrderPaid, notifyRefundEvent } from "./notification.service.js";
@@ -68,12 +74,12 @@ const appendPaymentEvent = ({ payment, stripeEventId, type, metadata = {} }) => 
 };
 
 const PAYMENT_ATTEMPT_PRIORITY = {
-  succeeded: 600,
-  partially_refunded: 500,
-  refunded: 400,
-  requires_action: 300,
-  pending: 200,
-  failed: 100,
+  [paymentStatuses.SUCCEEDED]: 600,
+  [paymentStatuses.PARTIALLY_REFUNDED]: 500,
+  [paymentStatuses.REFUNDED]: 400,
+  [paymentStatuses.REQUIRES_ACTION]: 300,
+  [paymentStatuses.PENDING]: 200,
+  [paymentStatuses.FAILED]: 100,
 };
 
 const paymentAttemptSortByPriority = (a, b) => {
@@ -102,16 +108,16 @@ const resolvePrimaryPaymentAttemptForOrder = async (orderId) => {
 const mapStripeIntentStatusToPaymentStatus = (stripeStatus) => {
   switch (String(stripeStatus ?? "")) {
     case "succeeded":
-      return "succeeded";
+      return paymentStatuses.SUCCEEDED;
     case "requires_action":
-      return "requires_action";
+      return paymentStatuses.REQUIRES_ACTION;
     case "canceled":
-      return "failed";
+      return paymentStatuses.FAILED;
     case "requires_payment_method":
     case "requires_confirmation":
     case "processing":
     default:
-      return "pending";
+      return paymentStatuses.PENDING;
   }
 };
 
@@ -305,14 +311,14 @@ const buildSubOrders = ({
       discountAmount: storeDiscount,
       platformFee,
       vendorNetAmount,
-      status: "pending",
+      status: subOrderStatuses.PENDING,
     };
   });
 };
 
 const buildStoreConnectContext = async (groupedByStore, session) => {
   const storeIds = Array.from(groupedByStore.values()).map((entry) => entry.storeId);
-  const stores = await Store.find({ _id: { $in: storeIds }, status: "active" })
+  const stores = await Store.find({ _id: { $in: storeIds }, status: accountStatuses.ACTIVE })
     .select("stripeConnectId commissionRate")
     .session(session);
 
@@ -363,7 +369,7 @@ const normalizeCartForCheckoutOrThrow = async (userId, session) => {
       throw createHttpError("Carrinho possui item inválido", 400, undefined, "CHECKOUT_INVALID_CART_ITEM");
     }
 
-    if (product.status !== "active" || product.store?.status !== "active") {
+    if (product.status !== accountStatuses.ACTIVE || product.store?.status !== accountStatuses.ACTIVE) {
       throw createHttpError("Carrinho possui item indisponível", 400, undefined, "CHECKOUT_ITEM_UNAVAILABLE");
     }
 
@@ -521,7 +527,7 @@ const calculateShippingByStoreForCheckoutOrThrow = async ({
     );
   }
 
-  const stores = await Store.find({ _id: { $in: storeIds }, status: "active" })
+  const stores = await Store.find({ _id: { $in: storeIds }, status: accountStatuses.ACTIVE })
     .select("_id address")
     .populate("address", "zipCode street number complement neighborhood city state");
 
@@ -650,7 +656,7 @@ export const getCheckoutShippingOptionsForUser = async (userId, payload) => {
   const freightPolicy = resolveFreightPolicyByCoupon(couponContext.coupon);
   const storeIds = Array.from(cartContext.groupedByStore.keys());
 
-  const stores = await Store.find({ _id: { $in: storeIds }, status: "active" })
+  const stores = await Store.find({ _id: { $in: storeIds }, status: accountStatuses.ACTIVE })
     .select("_id name address")
     .populate("address", "zipCode street number complement neighborhood city state");
 
@@ -773,7 +779,8 @@ export const createCheckoutIntentForUser = async (userId, payload) => {
   let connectContextByStore;
 
   try {
-    await session.withTransaction(async () => {
+    session.startTransaction();
+    try {
       const [address, paymentMethod, cartContext] = await Promise.all([
         Address.findOne({ _id: addressId, user: userId }).session(session),
         PaymentMethod.findOne({ _id: paymentMethodId, user: userId }).session(session),
@@ -857,7 +864,7 @@ export const createCheckoutIntentForUser = async (userId, payload) => {
             totalPaidByCustomer,
             totalShippingPrice,
             totalDiscount,
-            status: "pending",
+            status: orderStatuses.PENDING,
             shippingAddress: buildShippingSnapshot(address),
           },
         ],
@@ -889,7 +896,7 @@ export const createCheckoutIntentForUser = async (userId, payload) => {
             whoPays: shippingDetails.whoPays,
             shippingCost: subOrder.shippingCost,
             estimatedDeliveryDate: shippingService.calculateDeliveryDate(shippingDetails.selectedCarrier.deliveryTime),
-            status: "pending",
+            status: shippingStatuses.PENDING,
             shippingServiceInfo: {
               selectedCarrier: shippingDetails.selectedCarrier,
               freeShipping: shippingDetails.freeShipping,
@@ -928,7 +935,7 @@ export const createCheckoutIntentForUser = async (userId, payload) => {
               installments: 1,
             },
             platformRevenue,
-            status: "pending",
+            status: paymentStatuses.PENDING,
             events: [
               {
                 type: "checkout_intent_created",
@@ -944,7 +951,11 @@ export const createCheckoutIntentForUser = async (userId, payload) => {
         ],
         { session },
       );
-    });
+      await session.commitTransaction();
+    } catch (error) {
+      await session.abortTransaction();
+      throw error;
+    }
 
     let stripeIntent;
     try {
@@ -963,9 +974,9 @@ export const createCheckoutIntentForUser = async (userId, payload) => {
     } catch (error) {
       await Promise.all([
         Payment.updateOne(
-          { _id: payment._id, status: "pending" },
+          { _id: payment._id, status: paymentStatuses.PENDING },
           {
-            $set: { status: "failed" },
+            $set: { status: paymentStatuses.FAILED },
             $push: {
               events: {
                 type: "checkout_intent_failed",
@@ -977,8 +988,11 @@ export const createCheckoutIntentForUser = async (userId, payload) => {
             },
           },
         ),
-        Order.updateOne({ _id: order._id, status: "pending" }, { $set: { status: "failed" } }),
-        SubOrder.updateMany({ order: order._id, status: "pending" }, { $set: { status: "failed" } }),
+        Order.updateOne({ _id: order._id, status: orderStatuses.PENDING }, { $set: { status: orderStatuses.FAILED } }),
+        SubOrder.updateMany(
+          { order: order._id, status: subOrderStatuses.PENDING },
+          { $set: { status: subOrderStatuses.FAILED } },
+        ),
       ]);
 
       throw createHttpError(
@@ -1005,7 +1019,7 @@ export const createCheckoutIntentForUser = async (userId, payload) => {
         Payment.updateOne(
           { _id: payment._id },
           {
-            $set: { status: "failed" },
+            $set: { status: paymentStatuses.FAILED },
             $push: {
               events: {
                 type: "checkout_intent_persistence_failed",
@@ -1018,8 +1032,11 @@ export const createCheckoutIntentForUser = async (userId, payload) => {
             },
           },
         ),
-        Order.updateOne({ _id: order._id, status: "pending" }, { $set: { status: "failed" } }),
-        SubOrder.updateMany({ order: order._id, status: "pending" }, { $set: { status: "failed" } }),
+        Order.updateOne({ _id: order._id, status: orderStatuses.PENDING }, { $set: { status: orderStatuses.FAILED } }),
+        SubOrder.updateMany(
+          { order: order._id, status: subOrderStatuses.PENDING },
+          { $set: { status: subOrderStatuses.FAILED } },
+        ),
       ]);
 
       throw createHttpError(
@@ -1070,11 +1087,11 @@ export const resumeCheckoutIntentForUser = async (userId, orderId) => {
     throw createHttpError("Pedido não encontrado", 404, undefined, "CHECKOUT_ORDER_NOT_FOUND");
   }
 
-  if (order.status === "paid") {
+  if (order.status === orderStatuses.PAID) {
     throw createHttpError("Este pedido já foi pago", 409, undefined, "CHECKOUT_ALREADY_PAID");
   }
 
-  if (order.status === "cancelled") {
+  if (order.status === orderStatuses.CANCELLED) {
     throw createHttpError("Pedido cancelado não pode ser retomado", 409, undefined, "CHECKOUT_ORDER_CANCELLED");
   }
 
@@ -1122,8 +1139,8 @@ export const resumeCheckoutIntentForUser = async (userId, orderId) => {
       paymentId: payment._id.toString(),
       resumed: false,
       synchronized: true,
-      orderStatus: updatedOrder?.status ?? "paid",
-      paymentStatus: updatedPayment?.status ?? "succeeded",
+      orderStatus: updatedOrder?.status ?? orderStatuses.PAID,
+      paymentStatus: updatedPayment?.status ?? paymentStatuses.SUCCEEDED,
       paymentIntent: {
         provider: "stripe",
         status: paymentIntent.status,
@@ -1171,19 +1188,19 @@ export const resumeCheckoutIntentForUser = async (userId, orderId) => {
     );
 
     await Order.updateOne(
-      { _id: order._id, status: { $in: ["pending", "failed"] } },
+      { _id: order._id, status: { $in: [orderStatuses.PENDING, orderStatuses.FAILED] } },
       {
         $set: {
-          status: "pending",
+          status: orderStatuses.PENDING,
           stripePaymentId: paymentIntent.id,
         },
       },
     );
 
     await SubOrder.updateMany(
-      { order: order._id, status: "failed" },
+      { order: order._id, status: subOrderStatuses.FAILED },
       {
-        $set: { status: "pending" },
+        $set: { status: subOrderStatuses.PENDING },
       },
     );
   }
@@ -1220,7 +1237,7 @@ export const reconcileCheckoutOrderPaymentForUser = async (userId, orderId) => {
     throw createHttpError("Pagamento não encontrado para este pedido", 404, undefined, "CHECKOUT_PAYMENT_NOT_FOUND");
   }
 
-  if (order.status === "paid" && payment.status === "succeeded") {
+  if (order.status === orderStatuses.PAID && payment.status === paymentStatuses.SUCCEEDED) {
     return {
       orderId: order._id.toString(),
       paymentId: payment._id.toString(),
@@ -1264,8 +1281,8 @@ export const reconcileCheckoutOrderPaymentForUser = async (userId, orderId) => {
       orderId: order._id.toString(),
       paymentId: payment._id.toString(),
       synchronized: true,
-      orderStatus: updatedOrder?.status ?? "paid",
-      paymentStatus: updatedPayment?.status ?? "succeeded",
+      orderStatus: updatedOrder?.status ?? orderStatuses.PAID,
+      paymentStatus: updatedPayment?.status ?? paymentStatuses.SUCCEEDED,
       stripeStatus: stripePaymentIntent.status,
     };
   }
@@ -1317,22 +1334,23 @@ const markPaymentAsFailedByIntentId = async ({ stripePaymentIntentId, stripeEven
 
       if (isEventAlreadyProcessed(payment, stripeEventId)) return;
 
-      if (payment.status !== "succeeded") {
-        payment.status = eventType === "payment_intent.requires_action" ? "requires_action" : "failed";
+      if (payment.status !== paymentStatuses.SUCCEEDED) {
+        payment.status =
+          eventType === "payment_intent.requires_action" ? paymentStatuses.REQUIRES_ACTION : paymentStatuses.FAILED;
       }
 
       appendPaymentEvent({ payment, stripeEventId, type: eventType, metadata });
       await payment.save({ session });
 
-      if (payment.status === "failed") {
+      if (payment.status === paymentStatuses.FAILED) {
         await Order.updateOne(
-          { _id: payment.order, status: { $ne: "paid" } },
-          { $set: { status: "failed" } },
+          { _id: payment.order, status: { $ne: orderStatuses.PAID } },
+          { $set: { status: orderStatuses.FAILED } },
           { session },
         );
         await SubOrder.updateMany(
-          { order: payment.order, status: { $in: ["pending", "processing"] } },
-          { $set: { status: "failed" } },
+          { order: payment.order, status: { $in: [subOrderStatuses.PENDING, subOrderStatuses.PROCESSING] } },
+          { $set: { status: subOrderStatuses.FAILED } },
           { session },
         );
 
@@ -1354,15 +1372,15 @@ const tryDispatchPayoutTransfer = async ({ payout, payment, stripe }) => {
   }
   const store = await Store.findById(payout.store).select("stripeConnectId status").lean();
 
-  if (!store || store.status !== "active") {
-    payout.status = "failed";
+  if (!store || store.status !== accountStatuses.ACTIVE) {
+    payout.status = payoutStatuses.FAILED;
     payout.failureMessage = "Loja inválida para transferência";
     await payout.save();
     return;
   }
 
   if (!store.stripeConnectId) {
-    payout.status = "pending";
+    payout.status = payoutStatuses.PENDING;
     payout.failureMessage = "Onboarding Stripe pendente para a loja";
     await payout.save();
     return;
@@ -1370,7 +1388,7 @@ const tryDispatchPayoutTransfer = async ({ payout, payment, stripe }) => {
 
   const account = await stripe.accounts.retrieve(store.stripeConnectId);
   if (!account.charges_enabled || !account.payouts_enabled) {
-    payout.status = "pending";
+    payout.status = payoutStatuses.PENDING;
     payout.failureMessage = "Conta Stripe da loja ainda não habilitada para recebimento";
     await payout.save();
     return;
@@ -1378,7 +1396,7 @@ const tryDispatchPayoutTransfer = async ({ payout, payment, stripe }) => {
 
   const amountInCents = Math.round(Number(payout.amount ?? 0) * 100);
   if (amountInCents <= 0) {
-    payout.status = "cancelled";
+    payout.status = payoutStatuses.CANCELLED;
     payout.failureMessage = "Valor de transferência inválido";
     await payout.save();
     return;
@@ -1399,7 +1417,7 @@ const tryDispatchPayoutTransfer = async ({ payout, payment, stripe }) => {
   });
 
   payout.stripePayoutId = transfer.id;
-  payout.status = "paid";
+  payout.status = payoutStatuses.PAID;
   payout.payday = new Date();
   payout.failureMessage = null;
   await payout.save();
@@ -1411,7 +1429,7 @@ const dispatchPendingPayoutTransfersForOrder = async ({ orderId, paymentId }) =>
 
   const [payment, payouts] = await Promise.all([
     Payment.findById(paymentId).select("_id order stripeChargeId"),
-    Payout.find({ status: "pending" }).where("subOrders").in(subOrderIds),
+    Payout.find({ status: payoutStatuses.PENDING }).where("subOrders").in(subOrderIds),
   ]);
 
   if (!payment || payouts.length === 0) return;
@@ -1420,7 +1438,7 @@ const dispatchPendingPayoutTransfersForOrder = async ({ orderId, paymentId }) =>
     try {
       await tryDispatchPayoutTransfer({ payout, payment, stripe });
     } catch (error) {
-      payout.status = "failed";
+      payout.status = payoutStatuses.FAILED;
       payout.failureMessage = error?.message ?? "Falha ao transferir fundos para a loja";
       await payout.save();
     }
@@ -1429,7 +1447,7 @@ const dispatchPendingPayoutTransfersForOrder = async ({ orderId, paymentId }) =>
 
 export const dispatchPendingPayoutTransfersForStore = async (storeId) => {
   const stripe = getStripeClientOrThrow();
-  const payouts = await Payout.find({ store: storeId, status: "pending" }).sort({ createdAt: 1 });
+  const payouts = await Payout.find({ store: storeId, status: payoutStatuses.PENDING }).sort({ createdAt: 1 });
 
   for (const payout of payouts) {
     const subOrder = await SubOrder.findOne({ _id: { $in: payout.subOrders } })
@@ -1443,7 +1461,7 @@ export const dispatchPendingPayoutTransfersForStore = async (storeId) => {
     try {
       await tryDispatchPayoutTransfer({ payout, payment, stripe });
     } catch (error) {
-      payout.status = "failed";
+      payout.status = payoutStatuses.FAILED;
       payout.failureMessage = error?.message ?? "Falha ao transferir fundos para a loja";
       await payout.save();
     }
@@ -1458,7 +1476,8 @@ const markPaymentAsSucceededByIntentId = async ({ stripePaymentIntent, stripeEve
   let orderIdForNotification = null;
 
   try {
-    await session.withTransaction(async () => {
+    session.startTransaction();
+    try {
       const payment = await resolvePaymentFromStripeEvent({
         session,
         stripePaymentIntentId,
@@ -1479,15 +1498,19 @@ const markPaymentAsSucceededByIntentId = async ({ stripePaymentIntent, stripeEve
         payment.stripePaymentIntentId = stripePaymentIntentId;
       }
 
-      if (payment.status === "succeeded") {
+      if (payment.status === paymentStatuses.SUCCEEDED) {
         const order = await Order.findById(payment.order).session(session);
-        if (order && order.status !== "paid") {
-          order.status = "paid";
+        if (order && order.status !== orderStatuses.PAID) {
+          order.status = orderStatuses.PAID;
           await order.save({ session });
 
-          await SubOrder.updateMany({ order: order._id, status: { $ne: "paid" } }, { $set: { status: "paid" } }, {
-            session,
-          });
+          await SubOrder.updateMany(
+            { order: order._id, status: { $ne: subOrderStatuses.PAID } },
+            { $set: { status: subOrderStatuses.PAID } },
+            {
+              session,
+            },
+          );
 
           orderIdForNotification = order._id;
         }
@@ -1530,7 +1553,7 @@ const markPaymentAsSucceededByIntentId = async ({ stripePaymentIntent, stripeEve
         );
 
         if (hasInsufficientStock) {
-          payment.status = "failed";
+          payment.status = paymentStatuses.FAILED;
           appendPaymentEvent({
             payment,
             stripeEventId,
@@ -1539,11 +1562,11 @@ const markPaymentAsSucceededByIntentId = async ({ stripePaymentIntent, stripeEve
           });
           await payment.save({ session });
 
-          order.status = "failed";
+          order.status = orderStatuses.FAILED;
           await order.save({ session });
           await SubOrder.updateMany(
-            { order: order._id, status: { $in: ["pending", "processing"] } },
-            { $set: { status: "failed" } },
+            { order: order._id, status: { $in: [subOrderStatuses.PENDING, subOrderStatuses.PROCESSING] } },
+            { $set: { status: subOrderStatuses.FAILED } },
             { session },
           );
           return;
@@ -1602,10 +1625,14 @@ const markPaymentAsSucceededByIntentId = async ({ stripePaymentIntent, stripeEve
         { session },
       );
 
-      order.status = "paid";
+      order.status = orderStatuses.PAID;
       await order.save({ session });
 
-      await SubOrder.updateMany({ order: order._id, status: "pending" }, { $set: { status: "paid" } }, { session });
+      await SubOrder.updateMany(
+        { order: order._id, status: subOrderStatuses.PENDING },
+        { $set: { status: subOrderStatuses.PAID } },
+        { session },
+      );
 
       const payoutByStore = new Map();
       for (const subOrder of subOrders) {
@@ -1631,7 +1658,7 @@ const markPaymentAsSucceededByIntentId = async ({ stripePaymentIntent, stripeEve
             store: entry.store,
             subOrders: entry.subOrders,
             amount: entry.amount,
-            status: "pending",
+            status: payoutStatuses.PENDING,
           })),
           { session },
         );
@@ -1641,7 +1668,7 @@ const markPaymentAsSucceededByIntentId = async ({ stripePaymentIntent, stripeEve
       paymentIdForPayout = payment._id;
       orderIdForNotification = order._id;
 
-      payment.status = "succeeded";
+      payment.status = paymentStatuses.SUCCEEDED;
       payment.paidAt = new Date();
       payment.stripeChargeId =
         typeof stripePaymentIntent.latest_charge === "string"
@@ -1659,7 +1686,11 @@ const markPaymentAsSucceededByIntentId = async ({ stripePaymentIntent, stripeEve
       });
 
       await payment.save({ session });
-    });
+      await session.commitTransaction();
+    } catch (error) {
+      await session.abortTransaction();
+      throw error;
+    }
 
     if (orderIdForPayout && paymentIdForPayout) {
       await dispatchPendingPayoutTransfersForOrder({
@@ -1692,7 +1723,7 @@ const markPaymentAsRefundedByChargeId = async ({ stripeChargeId, amountRefundedI
       const isTotalRefund = refundedAmount >= totalAmount;
 
       payment.refundedAmount = refundedAmount;
-      payment.status = isTotalRefund ? "refunded" : "partially_refunded";
+      payment.status = isTotalRefund ? paymentStatuses.REFUNDED : paymentStatuses.PARTIALLY_REFUNDED;
 
       appendPaymentEvent({
         payment,
@@ -1739,7 +1770,10 @@ const syncPayoutStatusFromStripeEvent = async ({ connectedAccountId, payoutObjec
   let payout = await Payout.findOne({ stripePayoutId: payoutObject.id });
 
   if (!payout) {
-    payout = await Payout.findOne({ store: store._id, status: { $in: ["pending", "in_transit"] } }).sort({
+    payout = await Payout.findOne({
+      store: store._id,
+      status: { $in: [payoutStatuses.PENDING, payoutStatuses.IN_TRANSIT] },
+    }).sort({
       createdAt: 1,
     });
     if (!payout) return;
@@ -1748,21 +1782,21 @@ const syncPayoutStatusFromStripeEvent = async ({ connectedAccountId, payoutObjec
   }
 
   if (eventType === "payout.paid") {
-    payout.status = "paid";
+    payout.status = payoutStatuses.PAID;
     payout.payday = payoutObject.arrival_date ? new Date(payoutObject.arrival_date * 1000) : new Date();
   }
 
   if (eventType === "payout.failed") {
-    payout.status = "failed";
+    payout.status = payoutStatuses.FAILED;
     payout.failureMessage = payoutObject.failure_message ?? "Payout falhou no Stripe";
   }
 
   if (eventType === "payout.canceled") {
-    payout.status = "cancelled";
+    payout.status = payoutStatuses.CANCELLED;
   }
 
   if (eventType === "payout.created") {
-    payout.status = "in_transit";
+    payout.status = payoutStatuses.IN_TRANSIT;
   }
 
   await payout.save();

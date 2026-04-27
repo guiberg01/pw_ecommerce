@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { mongoIdSchema } from "./common.validator.js";
 import { paginationQuerySchema } from "./product.validator.js";
+import { accountStatuses } from "../constants/accountStatuses.js";
 
 export const createStoreSchema = z.object({
   name: z.string().trim().min(1, "Nome da loja é obrigatório"),
@@ -30,7 +31,7 @@ export const updateMyStoreSchema = z
   });
 
 export const updateStoreStatusByAdminSchema = z.object({
-  status: z.enum(["active", "suspended", "blocked", "deleted", "pending"]),
+  status: z.enum(Object.values(accountStatuses)),
 });
 
 export const storeIdParamSchema = z.object({

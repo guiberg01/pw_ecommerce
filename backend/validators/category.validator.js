@@ -21,7 +21,7 @@ const positiveIntFromQuery = (defaultValue) =>
   );
 
 export const categoryAdminListQuerySchema = z.object({
-  status: z.enum(["active", "inactive", "deleted"]).optional(),
+  status: z.enum(["active", "inactive"]).optional(),
   search: z.string().trim().min(1).optional(),
   page: positiveIntFromQuery(1),
   limit: positiveIntFromQuery(20).refine((value) => value <= 100, {
@@ -37,5 +37,5 @@ export const updateCategorySchema = z
     status: z.enum(["active", "inactive"]).optional(),
   })
   .refine((data) => Object.keys(data).length > 0, {
-    message: "Envie ao menos um campo para atualização",
+    error: "Envie ao menos um campo para atualização",
   });

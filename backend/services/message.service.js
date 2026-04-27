@@ -89,7 +89,7 @@ const assertNoInappropriateContentOrThrow = (text) => {
 };
 
 const ensureStoreExistsOrThrow = async (storeId) => {
-  const store = await Store.findOne({ _id: storeId, status: { $ne: "deleted" } }).select("_id owner name").lean();
+  const store = await Store.findOne({ _id: storeId }).select("_id owner name").lean();
 
   if (!store) {
     throw createHttpError("Loja não encontrada", 404, undefined, "MESSAGE_STORE_NOT_FOUND");
@@ -309,7 +309,7 @@ export const listConversationsForActor = async (actor, query = {}) => {
   if (actor.role === "customer") {
     filters = { channel: DIRECT_MESSAGE_CHANNEL, user: actor._id };
   } else if (actor.role === "seller") {
-    const ownedStoreIds = await Store.find({ owner: actor._id, status: { $ne: "deleted" } }).distinct("_id");
+    const ownedStoreIds = await Store.find({ owner: actor._id }).distinct("_id");
     filters = { channel: DIRECT_MESSAGE_CHANNEL, store: { $in: ownedStoreIds } };
   }
 

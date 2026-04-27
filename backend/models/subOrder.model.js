@@ -1,4 +1,5 @@
 import mongoose from "mongoose";
+import { subOrderStatuses } from "../constants/subOrderStatuses.js";
 
 const subOrderSchema = new mongoose.Schema(
   {
@@ -113,8 +114,8 @@ const subOrderSchema = new mongoose.Schema(
     },
     status: {
       type: String,
-      enum: ["pending", "paid", "processing", "shipping", "delivered", "cancelled", "failed"],
-      default: "pending",
+      enum: Object.values(subOrderStatuses),
+      default: subOrderStatuses.PENDING,
       index: true,
     },
   },

@@ -5,6 +5,9 @@ import ShippingQuote from "../models/shippingQuote.model.js";
 import melhorenvioService from "./melhorenvio.service.js";
 import MELHOR_ENVIO_CONFIG from "../config/melhorenvio.config.js";
 import { createHttpError } from "../helpers/httpError.js";
+import { orderStatuses } from "../constants/orderStatuses.js";
+import { shippingStatuses } from "../constants/shippingStatuses.js";
+import { subOrderStatuses } from "../constants/subOrderStatuses.js";
 
 /**
  * Serviço de Orquestração de Shipping
@@ -334,7 +337,7 @@ class ShippingService {
       whoPays: quote.whoPays,
       shippingCost: quote.freeShipping ? 0 : selectedCarrier.price,
       estimatedDeliveryDate: this.calculateDeliveryDate(selectedCarrier.deliveryTime),
-      status: "pending",
+      status: shippingStatuses.PENDING,
     });
 
     await shipping.save();
@@ -440,7 +443,7 @@ class ShippingService {
     }
 
     // Validar status do Order (precisa estar paid)
-    if (order.status !== "paid") {
+    if (order.status !== orderStatuses.PAID) {
       throw createHttpError(
         `Pedido deve estar pago antes de gerar etiqueta. Status atual: ${order.status}`,
         409,
@@ -576,12 +579,12 @@ class ShippingService {
 
     // Atualizar Shipping com dados do ME
     shipping.melhorEnvioOrderId = labelResult.id;
-    shipping.status = "posted";
+    shipping.status = shippingStatuses.POSTED;
     shipping.trackingCode = labelResult.tracking;
     shipping.labelUrl = labelResult.labelUrl;
     shipping.history.push({
       timestamp: new Date(),
-      status: "posted",
+      status: shippingStatuses.POSTED,
       description: "Etiqueta criada e postada no MelhorEnvio",
       melhorEnvioStatus: labelResult.status,
     });
@@ -721,16 +724,16 @@ class ShippingService {
 
     const subOrder = await SubOrder.findById(shipping.subOrder).select("_id order status");
     if (subOrder) {
-      if (["posted", "in_transit"].includes(newStatus)) {
-        subOrder.status = "shipping";
+      if ([shippingStatuses.POSTED, shippingStatuses.IN_TRANSIT].includes(newStatus)) {
+        subOrder.status = subOrderStatuses.SHIPPING;
       }
 
-      if (newStatus === "delivered") {
-        subOrder.status = "delivered";
+      if (newStatus === shippingStatuses.DELIVERED) {
+        subOrder.status = subOrderStatuses.DELIVERED;
       }
 
-      if (["failed", "cancelled"].includes(newStatus)) {
-        subOrder.status = "failed";
+      if ([shippingStatuses.FAILED, shippingStatuses.CANCELLED].includes(newStatus)) {
+        subOrder.status = subOrderStatuses.FAILED;
       }
 
       await subOrder.save();
@@ -755,13 +758,17 @@ class ShippingService {
     // Status operacionais de fulfillment permanecem representados em SubOrder/Shipping.
     const statuses = subOrders.map((s) => s.status);
 
-    let orderStatus = "pending";
-    if (statuses.every((s) => s === "cancelled")) {
-      orderStatus = "cancelled";
-    } else if (statuses.every((s) => s === "failed")) {
-      orderStatus = "failed";
-    } else if (statuses.some((s) => ["paid", "processing", "shipping", "delivered"].includes(s))) {
-      orderStatus = "paid";
+    let orderStatus = orderStatuses.PENDING;
+    if (statuses.every((s) => s === subOrderStatuses.CANCELLED)) {
+      orderStatus = orderStatuses.CANCELLED;
+    } else if (statuses.every((s) => s === subOrderStatuses.FAILED)) {
+      orderStatus = orderStatuses.FAILED;
+    } else if (
+      statuses.some((s) =>
+        [subOrderStatuses.PAID, subOrderStatuses.PROCESSING, subOrderStatuses.SHIPPING, subOrderStatuses.DELIVERED].includes(s),
+      )
+    ) {
+      orderStatus = orderStatuses.PAID;
     }
 
     const order = await Order.findByIdAndUpdate(orderId, { status: orderStatus }, { new: true });

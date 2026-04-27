@@ -3,10 +3,11 @@ import SubOrder from "../models/subOrder.model.js";
 import Payment from "../models/payment.model.js";
 import { createHttpError } from "../helpers/httpError.js";
 import { reconcileCheckoutOrderPaymentForUser } from "./checkout.service.js";
-import { buildPaginationResult, buildPaymentView, groupByOrderId } from "./orderView.helper.js";
+import { buildPaginationResult, buildPaymentView, groupByOrderId } from "../helpers/orderView.helper.js";
+import { orderStatuses } from "../constants/orderStatuses.js";
 
 const tryAutoReconcilePendingOrderPayment = async ({ orderId, userId, status }) => {
-  if (status !== "pending") {
+  if (status !== orderStatuses.PENDING) {
     return false;
   }
 
@@ -73,7 +74,7 @@ export const listOrdersForUser = async (
     return buildPaginationResult([], total, page, limit);
   }
 
-  const pendingOrders = orders.filter((order) => order.status === "pending");
+  const pendingOrders = orders.filter((order) => order.status === orderStatuses.PENDING);
   if (pendingOrders.length > 0) {
     await Promise.allSettled(
       pendingOrders.map((order) =>

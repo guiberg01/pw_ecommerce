@@ -323,7 +323,7 @@ export const listStoreProductReviews = async (actor, query = {}) => {
   const { page, limit, skip } = normalizePagination(query);
   const sort = getSort(query.sort);
 
-  const productIds = await Product.find({ store: store._id, status: { $ne: "deleted" } }).distinct("_id");
+  const productIds = await Product.find({ store: store._id }).distinct("_id");
 
   const [items, total] = await Promise.all([
     Review.find({ product: { $in: productIds } })

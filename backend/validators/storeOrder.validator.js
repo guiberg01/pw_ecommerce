@@ -1,6 +1,8 @@
 import { z } from "zod";
 import { mongoIdSchema } from "./common.validator.js";
 import { paginationQuerySchema } from "./product.validator.js";
+import { orderStatuses } from "../constants/orderStatuses.js";
+import { subOrderStatuses } from "../constants/subOrderStatuses.js";
 
 const DATE_ONLY_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
 
@@ -28,10 +30,8 @@ export const storeOrderIdParamSchema = z.object({
 
 export const storeOrderListQuerySchema = paginationQuerySchema
   .extend({
-    orderStatus: z.enum(["pending", "paid", "failed", "cancelled"]).optional(),
-    subOrderStatus: z
-      .enum(["pending", "paid", "processing", "shipping", "delivered", "cancelled", "failed"])
-      .optional(),
+    orderStatus: z.enum(Object.values(orderStatuses)).optional(),
+    subOrderStatus: z.enum(Object.values(subOrderStatuses)).optional(),
     createdFrom: dateFromQueryBoundary("start"),
     createdTo: dateFromQueryBoundary("end"),
     sort: z.enum(["newest", "oldest"]).optional().default("newest"),
@@ -47,5 +47,5 @@ export const storeOrderListQuerySchema = paginationQuerySchema
   });
 
 export const storeOrderStatusUpdateSchema = z.object({
-  status: z.enum(["processing", "shipping", "delivered"]),
+  status: z.enum([subOrderStatuses.PROCESSING, subOrderStatuses.SHIPPING, subOrderStatuses.DELIVERED]),
 });

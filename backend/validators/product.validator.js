@@ -50,7 +50,7 @@ const productVariantUpdateSchema = z
         ctx.addIssue({
           code: "custom",
           path: ["price"],
-          message: "Preço é obrigatório para criar uma variação extra",
+          error: "Preço é obrigatório para criar uma variação extra",
         });
       }
 
@@ -58,7 +58,7 @@ const productVariantUpdateSchema = z
         ctx.addIssue({
           code: "custom",
           path: ["stock"],
-          message: "Estoque é obrigatório para criar uma variação extra",
+          error: "Estoque é obrigatório para criar uma variação extra",
         });
       }
 
@@ -66,7 +66,7 @@ const productVariantUpdateSchema = z
         ctx.addIssue({
           code: "custom",
           path: ["sku"],
-          message: "SKU é obrigatório para criar uma variação extra",
+          error: "SKU é obrigatório para criar uma variação extra",
         });
       }
 
@@ -74,7 +74,7 @@ const productVariantUpdateSchema = z
         ctx.addIssue({
           code: "custom",
           path: ["imageUrl"],
-          message: "Imagem é obrigatória para criar uma variação extra",
+          error: "Imagem é obrigatória para criar uma variação extra",
         });
       }
     }
@@ -83,7 +83,7 @@ const productVariantUpdateSchema = z
       ctx.addIssue({
         code: "custom",
         path: ["variantId"],
-        message: "Envie ao menos um campo para atualizar a variação",
+        error: "Envie ao menos um campo para atualizar a variação",
       });
     }
   });
@@ -103,7 +103,7 @@ export const createProductSchema = z
       ctx.addIssue({
         code: "custom",
         path: ["maxPerPerson"],
-        message: "O limite máximo por pessoa não pode ser maior que o estoque",
+        error: "O limite máximo por pessoa não pode ser maior que o estoque",
       });
     }
 
@@ -112,7 +112,7 @@ export const createProductSchema = z
       ctx.addIssue({
         code: "custom",
         path: ["variants"],
-        message: "Não é permitido repetir SKU entre a variação principal e as variações extras",
+        error: "Não é permitido repetir SKU entre a variação principal e as variações extras",
       });
     }
   });
@@ -124,7 +124,7 @@ export const updateProductSchema = z
     category: mongoIdSchema.optional(),
     highlighted: z.boolean().optional(),
     maxPerPerson: z.number().int().min(1, "Limite máximo deve ser ao menos 1").optional().nullable(),
-    status: z.enum(["active", "blocked", "deleted"]).optional(),
+    status: z.enum(["active", "blocked"]).optional(),
     mainVariant: productVariantSchema.partial().optional(),
     variants: z.array(productVariantUpdateSchema).optional(),
     removeVariantIds: z.array(mongoIdSchema).optional(),
@@ -134,7 +134,7 @@ export const updateProductSchema = z
       ctx.addIssue({
         code: "custom",
         path: ["maxPerPerson"],
-        message: "O limite máximo por pessoa não pode ser maior que o estoque",
+        error: "O limite máximo por pessoa não pode ser maior que o estoque",
       });
     }
 
@@ -145,13 +145,13 @@ export const updateProductSchema = z
         ctx.addIssue({
           code: "custom",
           path: ["variants"],
-          message: "Não é permitido repetir SKU entre variações",
+          error: "Não é permitido repetir SKU entre variações",
         });
       }
     }
   })
   .refine((data) => Object.keys(data).length > 0, {
-    message: "Envie ao menos um campo para atualização",
+    error: "Envie ao menos um campo para atualização",
   });
 
 export const productIdParamSchema = z.object({

@@ -33,8 +33,12 @@ const shippingQuoteSchema = new mongoose.Schema(
       {
         id: String, // serviceId do ME
         name: String,
-        price: Number,
-        customPrice: Number,
+        price: {
+          type: Number,
+        },
+        customPrice: {
+          type: Number,
+        },
         deliveryTime: Number,
         customDeliveryTime: Number,
       },
@@ -42,8 +46,12 @@ const shippingQuoteSchema = new mongoose.Schema(
     // Volumes/pacotes calculados pelo ME
     packages: [
       {
-        price: Number,
-        discount: Number,
+        price: {
+          type: Number,
+        },
+        discount: {
+          type: Number,
+        },
         format: String,
         weight: Number,
         dimensions: {
@@ -63,7 +71,9 @@ const shippingQuoteSchema = new mongoose.Schema(
     selectedCarrier: {
       id: String,
       name: String,
-      price: Number,
+      price: {
+        type: Number,
+      },
       deliveryTime: Number,
     },
     // Quem paga o frete

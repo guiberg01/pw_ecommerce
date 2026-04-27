@@ -1,4 +1,6 @@
 import mongoose from "mongoose";
+import { orderStatuses } from "../constants/orderStatuses.js";
+import { useSoftDelete } from "./plugins/softDelete.plugin.js";
 
 const orderSchema = new mongoose.Schema(
   {
@@ -39,8 +41,8 @@ const orderSchema = new mongoose.Schema(
     },
     status: {
       type: String,
-      enum: ["pending", "paid", "failed", "cancelled"],
-      default: "pending",
+      enum: Object.values(orderStatuses),
+      default: orderStatuses.PENDING,
       index: true,
     },
     shippingAddress: {
@@ -60,10 +62,15 @@ const orderSchema = new mongoose.Schema(
             type: String,
             enum: ["Point"],
             default: "Point",
+            required: true,
           },
           coordinates: {
             type: [Number],
-            default: [0, 0],
+            required: true,
+            validate: {
+              validator: (value) => Array.isArray(value) && value.length === 2,
+              message: "shippingAddress.location.coordinates deve ser [longitude, latitude]",
+            },
           },
         },
       },
@@ -83,7 +90,9 @@ orderSchema.virtual("subOrder", {
   foreignField: "order",
 });
 
+useSoftDelete(orderSchema);
 orderSchema.index({ user: 1, createdAt: -1 });
+orderSchema.index({ "shippingAddress.location": "2dsphere" });
 
 const Order = mongoose.model("Order", orderSchema);
 

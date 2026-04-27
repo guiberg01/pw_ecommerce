@@ -1,5 +1,7 @@
 import mongoose from "mongoose";
 import { slugify } from "../helpers/slugUnique.helper.js";
+import { accountStatuses } from "../constants/accountStatuses.js";
+import { useSoftDelete } from "./plugins/softDelete.plugin.js";
 
 const storeSchema = new mongoose.Schema(
   {
@@ -46,8 +48,8 @@ const storeSchema = new mongoose.Schema(
     },
     status: {
       type: String,
-      enum: ["active", "suspended", "blocked", "deleted", "pending"],
-      default: "active",
+      enum: Object.values(accountStatuses),
+      default: accountStatuses.ACTIVE,
     },
     reputation: {
       type: Number,
@@ -95,11 +97,13 @@ storeSchema.pre("validate", function () {
   }
 });
 
+useSoftDelete(storeSchema);
+
 storeSchema.index(
   { owner: 1 },
   {
     unique: true,
-    partialFilterExpression: { status: { $ne: "deleted" } },
+    partialFilterExpression: { deletedAt: null },
   },
 );
 
