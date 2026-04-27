@@ -19,6 +19,10 @@ const MAX_AUDIT_EVENTS = 50;
 
 const isAuthenticated = (req) => Boolean(req.user?._id);
 
+const countCartItems = (items = []) => {
+  return items.reduce((sum, item) => sum + Number(item.quantity ?? 0), 0);
+};
+
 const withVersionRetry = async (executor) => {
   let lastError;
 
@@ -97,6 +101,10 @@ export const getItemQuantityInCart = (items, productId) => {
 
 export const addProductToCartForRequest = async (req, res, productId, quantity = 1) => {
   const productVariant = await getProductOrThrow(productId);
+  const previousPersistedCart = isAuthenticated(req)
+    ? await Cart.findOne({ user: req.user._id }).select("items").lean()
+    : null;
+  const previousItemCount = countCartItems(previousPersistedCart?.items ?? []);
 
   if (productVariant.stock <= 0) {
     throw createHttpError("Produto sem estoque disponível", 400, undefined, "CART_OUT_OF_STOCK");
@@ -120,7 +128,7 @@ export const addProductToCartForRequest = async (req, res, productId, quantity =
     return upsertCartItem(items, productVariant._id, quantity, { increment: true });
   });
 
-  if (isAuthenticated(req)) {
+  if (isAuthenticated(req) && previousItemCount === 0 && result.itemCount > 0) {
     await notifyCartReminderForUser(req.user._id, { itemCount: result.itemCount });
   }
 
