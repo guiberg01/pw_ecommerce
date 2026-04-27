@@ -6,21 +6,29 @@ import { createHttpError } from "../helpers/httpError.js";
 import { findActiveStoreByOwnerOrThrow } from "./catalog.service.js";
 import { findSellerOrderByIdOrThrow } from "./storeOrder.service.js";
 import { notifyOrderStatusForCustomer } from "./notification.service.js";
+import { orderStatuses } from "../constants/orderStatuses.js";
+import { shippingStatuses } from "../constants/shippingStatuses.js";
+import { subOrderStatuses } from "../constants/subOrderStatuses.js";
 
 const SELLER_STATUS_FLOW = {
-  pending: [],
-  paid: ["processing"],
-  processing: ["shipping"],
-  shipping: ["delivered"],
-  delivered: [],
-  cancelled: [],
-  failed: [],
+  [subOrderStatuses.PENDING]: [],
+  [subOrderStatuses.PAID]: [subOrderStatuses.PROCESSING],
+  [subOrderStatuses.PROCESSING]: [subOrderStatuses.SHIPPING],
+  [subOrderStatuses.SHIPPING]: [subOrderStatuses.DELIVERED],
+  [subOrderStatuses.DELIVERED]: [],
+  [subOrderStatuses.CANCELLED]: [],
+  [subOrderStatuses.FAILED]: [],
 };
 
-const ORDER_PAID_LIKE_STATUSES = new Set(["paid", "processing", "shipping", "delivered"]);
+const ORDER_PAID_LIKE_STATUSES = new Set([
+  subOrderStatuses.PAID,
+  subOrderStatuses.PROCESSING,
+  subOrderStatuses.SHIPPING,
+  subOrderStatuses.DELIVERED,
+]);
 
 const ensureValidSellerStatusTransitionOrThrow = async (currentStatus, nextStatus, subOrderId) => {
-  if (currentStatus === "pending") {
+  if (currentStatus === subOrderStatuses.PENDING) {
     throw createHttpError(
       "O pagamento ainda não foi confirmado para iniciar a operação do pedido",
       409,
@@ -50,10 +58,10 @@ const ensureValidSellerStatusTransitionOrThrow = async (currentStatus, nextStatu
   }
 
   // Validação adicional: para transicionar para "shipping", etiqueta deve existir
-  if (nextStatus === "shipping") {
+  if (nextStatus === subOrderStatuses.SHIPPING) {
     const shipping = await Shipping.findOne({
       subOrder: subOrderId,
-      status: { $in: ["posted", "in_transit"] },
+      status: { $in: [shippingStatuses.POSTED, shippingStatuses.IN_TRANSIT] },
     });
 
     if (!shipping) {
@@ -72,20 +80,20 @@ const deriveOrderStatusFromSubOrders = (subOrderStatuses = []) => {
     return null;
   }
 
-  if (subOrderStatuses.every((status) => status === "cancelled")) {
-    return "cancelled";
+  if (subOrderStatuses.every((status) => status === subOrderStatuses.CANCELLED)) {
+    return orderStatuses.CANCELLED;
   }
 
-  if (subOrderStatuses.every((status) => status === "failed")) {
-    return "failed";
+  if (subOrderStatuses.every((status) => status === subOrderStatuses.FAILED)) {
+    return orderStatuses.FAILED;
   }
 
   if (subOrderStatuses.some((status) => ORDER_PAID_LIKE_STATUSES.has(status))) {
-    return "paid";
+    return orderStatuses.PAID;
   }
 
-  if (subOrderStatuses.every((status) => status === "pending")) {
-    return "pending";
+  if (subOrderStatuses.every((status) => status === subOrderStatuses.PENDING)) {
+    return orderStatuses.PENDING;
   }
 
   return null;
