@@ -1,6 +1,7 @@
 import Store from "../models/store.model.js";
 import { createHttpError } from "../helpers/httpError.js";
 import { sendSuccess } from "../helpers/successResponse.js";
+import melhorenvioService from "../services/melhorenvio.service.js";
 import {
   ensureStoreHasNoActiveProducts,
   createStores,
@@ -29,7 +30,12 @@ export const allStores = async (req, res, next) => {
 export const createStore = async (req, res, next) => {
   try {
     const store = await createStores(req.user._id, req.body);
-    return sendSuccess(res, 201, "Loja criada com sucesso", store);
+    const melhorEnvioOnboardingUrl = melhorenvioService.generateAuthorizationUrl(store._id.toString());
+
+    return sendSuccess(res, 201, "Loja criada com sucesso", {
+      ...store.toObject(),
+      melhorEnvioOnboardingUrl,
+    });
   } catch (error) {
     return next(error);
   }

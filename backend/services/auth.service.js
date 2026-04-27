@@ -39,6 +39,8 @@ export const startUserSession = async (req, res, userId) => {
   await syncGuestCartToUserCart(userId, req.cookies.guestCartId);
   clearGuestCartCookie(res);
   setSessionCookies(res, accessToken, refreshToken);
+
+  return { accessToken, refreshToken };
 };
 
 export const endUserSession = async (req, res) => {

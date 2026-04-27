@@ -1,6 +1,7 @@
 import axios from "axios";
 import MELHOR_ENVIO_CONFIG from "../config/melhorenvio.config.js";
 import MelhorEnvioAuth from "../models/melhorEnvioAuth.model.js";
+import { createHttpError } from "../helpers/httpError.js";
 
 /**
  * Serviço HTTP client para API MelhorEnvio
@@ -24,6 +25,7 @@ class MelhorEnvioService {
       headers: {
         "Content-Type": "application/json",
         Accept: "application/json",
+        "User-Agent": "PW MelhorEnvio Integration (suporte@localhost)",
       },
     };
 
@@ -82,8 +84,12 @@ class MelhorEnvioService {
       redirect_uri: this.redirectUri,
       response_type: "code",
       state: storeId, // usar storeId como state para validar depois
-      scope: "shipment-create shipment-read shipment-shipping shipment-cancel",
     });
+
+    const configuredScope = String(MELHOR_ENVIO_CONFIG.oauth.scope ?? "").trim();
+    if (configuredScope) {
+      params.set("scope", configuredScope.replace(/,/g, " "));
+    }
 
     return `${this.baseUrl}${MELHOR_ENVIO_CONFIG.endpoints.authorize}?${params.toString()}`;
   }
@@ -109,11 +115,12 @@ class MelhorEnvioService {
         expiresIn: response.data.expires_in, // segundos
       };
     } catch (error) {
-      throw {
-        errorCode: "ME_AUTH_EXCHANGE_FAILED",
-        message: "Falha ao trocar código de autorização por token",
-        details: error.response?.data || error.message,
-      };
+      throw createHttpError(
+        "Falha ao trocar código de autorização por token",
+        502,
+        error.response?.data || error.message,
+        "ME_AUTH_EXCHANGE_FAILED",
+      );
     }
   }
 
@@ -136,11 +143,12 @@ class MelhorEnvioService {
         expiresIn: response.data.expires_in,
       };
     } catch (error) {
-      throw {
-        errorCode: "ME_REFRESH_FAILED",
-        message: "Falha ao renovar token MelhorEnvio",
-        details: error.response?.data || error.message,
-      };
+      throw createHttpError(
+        "Falha ao renovar token MelhorEnvio",
+        502,
+        error.response?.data || error.message,
+        "ME_REFRESH_FAILED",
+      );
     }
   }
 
@@ -154,10 +162,12 @@ class MelhorEnvioService {
     });
 
     if (!auth) {
-      throw {
-        errorCode: "ME_AUTH_NOT_FOUND",
-        message: "Loja não possui credenciais MelhorEnvio configuradas",
-      };
+      throw createHttpError(
+        "Loja não possui credenciais MelhorEnvio configuradas",
+        404,
+        undefined,
+        "ME_AUTH_NOT_FOUND",
+      );
     }
 
     // Renovar se expira em menos de 5 minutos
@@ -180,54 +190,324 @@ class MelhorEnvioService {
    */
   async calculateShipping(storeId, payload) {
     const token = await this.ensureValidToken(storeId);
-    const axiosInstance = this.createAxiosInstance(token);
+    let axiosInstance = this.createAxiosInstance(token);
+    const configuredEndpoint = MELHOR_ENVIO_CONFIG.endpoints.calculateShipping;
+    const endpointCandidates = [configuredEndpoint];
 
-    try {
-      const response = await this.runWithRetry("calculateShipping", () =>
-        axiosInstance.post(MELHOR_ENVIO_CONFIG.endpoints.calculateShipping, payload),
-      );
+    const legacyCandidate = configuredEndpoint.includes("/api/v2/me/")
+      ? configuredEndpoint.replace("/api/v2/me/", "/api/")
+      : configuredEndpoint.replace("/api/", "/api/v2/me/");
 
-      return {
-        carriers: response.data,
-        timestamp: new Date(),
-      };
-    } catch (error) {
-      throw {
-        errorCode: "ME_CALCULATE_FAILED",
-        message: "Falha ao calcular frete com MelhorEnvio",
-        details: error.response?.data || error.message,
-      };
+    if (legacyCandidate && !endpointCandidates.includes(legacyCandidate)) {
+      endpointCandidates.push(legacyCandidate);
     }
+
+    // Alguns apps usam o endpoint v2 sem "/me".
+    // Mantemos compatibilidade testando essa variação também.
+    const v2NoMeCandidate = configuredEndpoint
+      .replace("/api/v2/me/", "/api/v2/")
+      .replace("/api/me/", "/api/");
+    if (v2NoMeCandidate && !endpointCandidates.includes(v2NoMeCandidate)) {
+      endpointCandidates.push(v2NoMeCandidate);
+    }
+
+    const isUnauthorizedStatus = (status) => [401, 403].includes(Number(status));
+
+    const tryCalculateAcrossCandidates = async () => {
+      let lastError = null;
+      let unauthorizedError = null;
+
+      for (const endpoint of endpointCandidates) {
+        try {
+          const response = await this.runWithRetry("calculateShipping", () => axiosInstance.post(endpoint, payload));
+          return {
+            data: {
+              carriers: response.data,
+              timestamp: new Date(),
+            },
+            error: null,
+          };
+        } catch (error) {
+          lastError = error;
+          const status = Number(error?.response?.status ?? 0);
+
+          // Em caso de incompatibilidade de endpoint/método, tenta o próximo candidato.
+          if ([404, 405].includes(status)) {
+            continue;
+          }
+
+          // Guarda erro de autorização e tenta os próximos endpoints antes de concluir reauth.
+          if (isUnauthorizedStatus(status)) {
+            unauthorizedError = unauthorizedError || error;
+            continue;
+          }
+
+          throw createHttpError(
+            "Falha ao calcular frete com MelhorEnvio",
+            502,
+            error.response?.data || error.message,
+            "ME_CALCULATE_FAILED",
+          );
+        }
+      }
+
+      if (unauthorizedError) {
+        return { data: null, error: unauthorizedError };
+      }
+
+      return { data: null, error: lastError };
+    };
+
+    const firstAttempt = await tryCalculateAcrossCandidates();
+    if (firstAttempt.data) return firstAttempt.data;
+
+    const firstStatus = Number(firstAttempt.error?.response?.status ?? 0);
+    if (isUnauthorizedStatus(firstStatus)) {
+      const auth = await MelhorEnvioAuth.findOne({ store: storeId, isActive: true });
+      if (auth?.refreshToken) {
+        try {
+          const refreshedTokens = await this.refreshAccessToken(auth.refreshToken);
+          auth.accessToken = refreshedTokens.accessToken;
+          auth.refreshToken = refreshedTokens.refreshToken;
+          auth.expiresAt = new Date(Date.now() + Number(refreshedTokens.expiresIn ?? 0) * 1000);
+          auth.lastRefreshed = new Date();
+          await auth.save();
+
+          axiosInstance = this.createAxiosInstance(refreshedTokens.accessToken);
+          const secondAttempt = await tryCalculateAcrossCandidates();
+          if (secondAttempt.data) return secondAttempt.data;
+
+          const secondStatus = Number(secondAttempt.error?.response?.status ?? 0);
+          if (isUnauthorizedStatus(secondStatus)) {
+            throw createHttpError(
+              "A conta da loja não está autorizada para cálculo de frete no MelhorEnvio. Reconecte a loja no onboarding.",
+              502,
+              {
+                providerError: secondAttempt.error?.response?.data || secondAttempt.error?.message,
+                attemptedEndpoints: endpointCandidates,
+                environment: MELHOR_ENVIO_CONFIG.environment,
+                hasConfiguredScope: Boolean(String(MELHOR_ENVIO_CONFIG.oauth.scope ?? "").trim()),
+              },
+              "ME_REAUTH_REQUIRED",
+            );
+          }
+
+          throw createHttpError(
+            "Falha ao calcular frete com MelhorEnvio",
+            502,
+            secondAttempt.error?.response?.data || secondAttempt.error?.message,
+            "ME_CALCULATE_FAILED",
+          );
+        } catch (error) {
+          if (error?.code === "ME_REAUTH_REQUIRED" || error?.code === "ME_CALCULATE_FAILED") {
+            throw error;
+          }
+
+          throw createHttpError(
+            "Falha ao renovar autenticação com MelhorEnvio para cálculo de frete",
+            502,
+            error?.response?.data || error?.message,
+            "ME_AUTH_REFRESH_FOR_CALCULATE_FAILED",
+          );
+        }
+      }
+
+      throw createHttpError(
+        "A conta da loja não está autorizada para cálculo de frete no MelhorEnvio. Reconecte a loja no onboarding.",
+        502,
+        {
+          providerError: firstAttempt.error?.response?.data || firstAttempt.error?.message,
+          attemptedEndpoints: endpointCandidates,
+          environment: MELHOR_ENVIO_CONFIG.environment,
+          hasConfiguredScope: Boolean(String(MELHOR_ENVIO_CONFIG.oauth.scope ?? "").trim()),
+        },
+        "ME_REAUTH_REQUIRED",
+      );
+    }
+
+    throw createHttpError(
+      "Falha ao calcular frete com MelhorEnvio",
+      502,
+      firstAttempt.error?.response?.data || firstAttempt.error?.message,
+      "ME_CALCULATE_FAILED",
+    );
   }
 
   /**
    * Cria etiqueta de envio (insere no carrinho do ME)
-   * POST /api/shipment
+   * POST /api/v2/me/shipment
    */
   async createShippingLabel(storeId, payload) {
     const token = await this.ensureValidToken(storeId);
-    const axiosInstance = this.createAxiosInstance(token);
+    let axiosInstance = this.createAxiosInstance(token);
 
-    try {
-      const response = await this.runWithRetry("createShippingLabel", () =>
-        axiosInstance.post(MELHOR_ENVIO_CONFIG.endpoints.createShippingLabel, payload),
-      );
+    const normalizeLabelPayload = (rawData) => {
+      const base = Array.isArray(rawData) ? rawData[0] : rawData;
+      const data = base?.data && typeof base.data === "object" ? base.data : base;
+
+      if (!data || !data.id) {
+        return null;
+      }
 
       return {
-        id: response.data.id,
-        protocol: response.data.protocol,
-        status: response.data.status,
-        tracking: response.data.tracking,
-        labelUrl: response.data.label, // URL da etiqueta impressão
+        id: data.id,
+        protocol: data.protocol,
+        status: data.status,
+        tracking: data.tracking,
+        labelUrl: data.label,
         timestamp: new Date(),
       };
-    } catch (error) {
-      throw {
-        errorCode: "ME_CREATE_LABEL_FAILED",
-        message: "Falha ao criar etiqueta de envio",
-        details: error.response?.data || error.message,
-      };
+    };
+
+    const configuredEndpoint = MELHOR_ENVIO_CONFIG.endpoints.createShippingLabel;
+    const endpointCandidates = [
+      configuredEndpoint,
+      "/api/v2/me/cart",
+      "/api/v2/me/shipment/checkout",
+      "/api/v2/me/shipment/generate",
+      "/api/v2/me/shipment",
+      "/api/v2/shipment",
+      "/api/shipment",
+    ];
+    const uniqueCandidates = Array.from(new Set(endpointCandidates.filter(Boolean)));
+
+    const isUnauthorizedStatus = (status) => [401, 403].includes(Number(status));
+
+    const tryCreateAcrossCandidates = async () => {
+      let lastError = null;
+      let unauthorizedError = null;
+      const invalidResponses = [];
+
+      for (const endpoint of uniqueCandidates) {
+        try {
+          const response = await this.runWithRetry("createShippingLabel", () => axiosInstance.post(endpoint, payload));
+          const normalized = normalizeLabelPayload(response.data);
+
+          if (normalized) {
+            return { data: normalized, error: null, invalidResponses };
+          }
+
+          invalidResponses.push({
+            endpoint,
+            providerResponse: response.data,
+          });
+          continue;
+        } catch (error) {
+          lastError = error;
+          const status = Number(error?.response?.status ?? 0);
+
+          if ([404, 405].includes(status)) {
+            continue;
+          }
+
+          if (isUnauthorizedStatus(status)) {
+            unauthorizedError = unauthorizedError || error;
+            continue;
+          }
+
+          throw createHttpError(
+            "Falha ao criar etiqueta de envio",
+            502,
+            error.response?.data || error.message,
+            "ME_CREATE_LABEL_FAILED",
+          );
+        }
+      }
+
+      if (unauthorizedError) {
+        return { data: null, error: unauthorizedError, invalidResponses };
+      }
+
+      if (invalidResponses.length > 0 && !lastError) {
+        lastError = createHttpError(
+          "Resposta inválida ao criar etiqueta no MelhorEnvio",
+          502,
+          { invalidResponses },
+          "ME_CREATE_LABEL_INVALID_RESPONSE",
+        );
+      }
+
+      return { data: null, error: lastError, invalidResponses };
+    };
+
+    const firstAttempt = await tryCreateAcrossCandidates();
+    if (firstAttempt.data) return firstAttempt.data;
+
+    const firstStatus = Number(firstAttempt.error?.response?.status ?? 0);
+    if (isUnauthorizedStatus(firstStatus)) {
+      const auth = await MelhorEnvioAuth.findOne({ store: storeId, isActive: true });
+      if (auth?.refreshToken) {
+        try {
+          const refreshedTokens = await this.refreshAccessToken(auth.refreshToken);
+          auth.accessToken = refreshedTokens.accessToken;
+          auth.refreshToken = refreshedTokens.refreshToken;
+          auth.expiresAt = new Date(Date.now() + Number(refreshedTokens.expiresIn ?? 0) * 1000);
+          auth.lastRefreshed = new Date();
+          await auth.save();
+
+          axiosInstance = this.createAxiosInstance(refreshedTokens.accessToken);
+          const secondAttempt = await tryCreateAcrossCandidates();
+          if (secondAttempt.data) return secondAttempt.data;
+
+          const secondStatus = Number(secondAttempt.error?.response?.status ?? 0);
+          if (isUnauthorizedStatus(secondStatus)) {
+            throw createHttpError(
+              "A conta da loja não está autorizada para criação de etiqueta no MelhorEnvio. Reconecte a loja no onboarding.",
+              502,
+              {
+                providerError: secondAttempt.error?.response?.data || secondAttempt.error?.message,
+                attemptedEndpoints: uniqueCandidates,
+                environment: MELHOR_ENVIO_CONFIG.environment,
+                configuredScope: String(MELHOR_ENVIO_CONFIG.oauth.scope ?? "").trim(),
+              },
+              "ME_REAUTH_REQUIRED",
+            );
+          }
+
+          throw createHttpError(
+            "Falha ao criar etiqueta de envio",
+            502,
+            secondAttempt.error?.response?.data || secondAttempt.error?.message,
+            "ME_CREATE_LABEL_FAILED",
+          );
+        } catch (error) {
+          if (error?.code === "ME_REAUTH_REQUIRED" || error?.code === "ME_CREATE_LABEL_FAILED") {
+            throw error;
+          }
+
+          throw createHttpError(
+            "Falha ao renovar autenticação com MelhorEnvio para criação de etiqueta",
+            502,
+            error?.response?.data || error?.message,
+            "ME_AUTH_REFRESH_FOR_LABEL_FAILED",
+          );
+        }
+      }
+
+      throw createHttpError(
+        "A conta da loja não está autorizada para criação de etiqueta no MelhorEnvio. Reconecte a loja no onboarding.",
+        502,
+        {
+          providerError: firstAttempt.error?.response?.data || firstAttempt.error?.message,
+          attemptedEndpoints: uniqueCandidates,
+          environment: MELHOR_ENVIO_CONFIG.environment,
+          configuredScope: String(MELHOR_ENVIO_CONFIG.oauth.scope ?? "").trim(),
+        },
+        "ME_REAUTH_REQUIRED",
+      );
     }
+
+    throw createHttpError(
+      "Falha ao criar etiqueta de envio",
+      502,
+      {
+        providerError: firstAttempt.error?.response?.data || firstAttempt.error?.message,
+        invalidResponses: firstAttempt.invalidResponses ?? [],
+        attemptedEndpoints: uniqueCandidates,
+        environment: MELHOR_ENVIO_CONFIG.environment,
+      },
+      "ME_CREATE_LABEL_FAILED",
+    );
   }
 
   /**
@@ -244,11 +524,12 @@ class MelhorEnvioService {
 
       return response.data;
     } catch (error) {
-      throw {
-        errorCode: "ME_GET_LABEL_FAILED",
-        message: "Falha ao buscar detalhes da etiqueta",
-        details: error.response?.data || error.message,
-      };
+      throw createHttpError(
+        "Falha ao buscar detalhes da etiqueta",
+        502,
+        error.response?.data || error.message,
+        "ME_GET_LABEL_FAILED",
+      );
     }
   }
 
@@ -270,11 +551,12 @@ class MelhorEnvioService {
 
       return response.data;
     } catch (error) {
-      throw {
-        errorCode: "ME_GET_PRINT_FAILED",
-        message: "Falha ao gerar URL de impressão da etiqueta",
-        details: error.response?.data || error.message,
-      };
+      throw createHttpError(
+        "Falha ao gerar URL de impressão da etiqueta",
+        502,
+        error.response?.data || error.message,
+        "ME_GET_PRINT_FAILED",
+      );
     }
   }
 
@@ -296,11 +578,12 @@ class MelhorEnvioService {
         timestamp: new Date(),
       };
     } catch (error) {
-      throw {
-        errorCode: "ME_CANCEL_LABEL_FAILED",
-        message: "Falha ao cancelar etiqueta",
-        details: error.response?.data || error.message,
-      };
+      throw createHttpError(
+        "Falha ao cancelar etiqueta",
+        502,
+        error.response?.data || error.message,
+        "ME_CANCEL_LABEL_FAILED",
+      );
     }
   }
 
@@ -323,11 +606,7 @@ class MelhorEnvioService {
 
       return response.data;
     } catch (error) {
-      throw {
-        errorCode: "ME_TRACK_FAILED",
-        message: "Falha ao rastrear envios",
-        details: error.response?.data || error.message,
-      };
+      throw createHttpError("Falha ao rastrear envios", 502, error.response?.data || error.message, "ME_TRACK_FAILED");
     }
   }
 
@@ -346,11 +625,12 @@ class MelhorEnvioService {
 
       return response.data;
     } catch (error) {
-      throw {
-        errorCode: "ME_GET_CARRIERS_FAILED",
-        message: "Falha ao buscar transportadoras disponíveis",
-        details: error.response?.data || error.message,
-      };
+      throw createHttpError(
+        "Falha ao buscar transportadoras disponíveis",
+        502,
+        error.response?.data || error.message,
+        "ME_GET_CARRIERS_FAILED",
+      );
     }
   }
 }

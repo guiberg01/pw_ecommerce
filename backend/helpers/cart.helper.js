@@ -305,8 +305,9 @@ export const syncGuestCartToUserCart = async (userId, cartId) => {
     const guestItems = await sanitizeCartItems(guestCart?.items ?? []);
 
     if (guestItems.length === 0) {
+      const existingCart = await findOrCreatePersistedCart(userId);
       await deleteGuestCart(cartId);
-      return null;
+      return existingCart;
     }
 
     const existingCart = await findOrCreatePersistedCart(userId);

@@ -25,8 +25,8 @@ router.get("/unread-count", isLoggedIn, getMyUnreadNotificationCount);
 router.patch("/read-all", isLoggedIn, patchAllNotificationsRead);
 router.patch("/:id/read", isLoggedIn, validateParams(notificationIdParamSchema), patchNotificationRead);
 router.post("/:id/click", isLoggedIn, validateParams(notificationIdParamSchema), postNotificationClick);
-router.delete("/:id", isLoggedIn, validateParams(notificationIdParamSchema), removeNotification);
 router.delete("/", isLoggedIn, removeAllNotifications);
+router.delete("/:id", isLoggedIn, validateParams(notificationIdParamSchema), removeNotification);
 
 router.post(
   "/admin/broadcast",

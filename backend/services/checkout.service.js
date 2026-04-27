@@ -3,6 +3,7 @@ import Stripe from "stripe";
 import Cart from "../models/cart.model.js";
 import Order from "../models/order.model.js";
 import SubOrder from "../models/subOrder.model.js";
+import Shipping from "../models/shipping.model.js";
 import ProductVariant from "../models/productVariant.model.js";
 import Address from "../models/address.model.js";
 import PaymentMethod from "../models/paymentMethod.model.js";
@@ -12,11 +13,9 @@ import CouponUsage from "../models/couponUsage.model.js";
 import Payout from "../models/payout.model.js";
 import Store from "../models/store.model.js";
 import { createHttpError } from "../helpers/httpError.js";
-import {
-  notifyOrderFailedOrCancelled,
-  notifyOrderPaid,
-  notifyRefundEvent,
-} from "./notification.service.js";
+import melhorenvioService from "./melhorenvio.service.js";
+import shippingService from "./shipping.service.js";
+import { notifyOrderFailedOrCancelled, notifyOrderPaid, notifyRefundEvent } from "./notification.service.js";
 
 const roundMoney = (value) => Math.round((Number(value) + Number.EPSILON) * 100) / 100;
 const CHECKOUT_EVENT_SOURCE = "stripe_webhook";
@@ -98,6 +97,22 @@ const resolvePrimaryPaymentAttemptForOrder = async (orderId) => {
 
   const [primaryAttempt] = [...attempts].sort(paymentAttemptSortByPriority);
   return primaryAttempt ?? null;
+};
+
+const mapStripeIntentStatusToPaymentStatus = (stripeStatus) => {
+  switch (String(stripeStatus ?? "")) {
+    case "succeeded":
+      return "succeeded";
+    case "requires_action":
+      return "requires_action";
+    case "canceled":
+      return "failed";
+    case "requires_payment_method":
+    case "requires_confirmation":
+    case "processing":
+    default:
+      return "pending";
+  }
 };
 
 const consumeCouponIfNeeded = async ({ session, couponSnapshot, orderId, userId }) => {
@@ -242,6 +257,7 @@ const buildSubOrders = ({
   coupon,
   eligibleItemKeys,
   commissionRateByStore,
+  shippingByStore,
 }) => {
   const stores = Array.from(groupedByStore.values());
   const subTotalAllStores = roundMoney(stores.reduce((sum, store) => sum + store.subTotal, 0));
@@ -266,7 +282,7 @@ const buildSubOrders = ({
 
     allocatedDiscount = roundMoney(allocatedDiscount + storeDiscount);
 
-    const shippingCost = 0;
+    const shippingCost = Number(shippingByStore.get(storeGroup.storeId.toString())?.shippingCost ?? 0);
     const commissionRate = getCommissionRate(commissionRateByStore.get(storeGroup.storeId.toString()));
     const platformFee = roundMoney(((storeGroup.subTotal - storeDiscount + shippingCost) * commissionRate) / 100);
     const vendorNetAmount = roundMoney(storeGroup.subTotal - storeDiscount + shippingCost - platformFee);
@@ -321,7 +337,7 @@ const normalizeCartForCheckoutOrThrow = async (userId, session) => {
     .session(session)
     .populate({
       path: "items.productVariant",
-      select: "price stock sku imageUrl product",
+      select: "price stock sku imageUrl product weight length width height",
       populate: {
         path: "product",
         select: "name maxPerPerson status category store",
@@ -389,6 +405,10 @@ const normalizeCartForCheckoutOrThrow = async (userId, session) => {
       unitPrice: roundMoney(productVariant.price),
       quantity,
       imageUrl: productVariant.imageUrl,
+      weight: Number(productVariant.weight ?? 0) || 0,
+      length: Number(productVariant.length ?? 0) || 0,
+      width: Number(productVariant.width ?? 0) || 0,
+      height: Number(productVariant.height ?? 0) || 0,
     };
 
     normalizedItems.push(normalizedItem);
@@ -409,6 +429,10 @@ const normalizeCartForCheckoutOrThrow = async (userId, session) => {
       price: normalizedItem.unitPrice,
       quantity: normalizedItem.quantity,
       imageUrl: normalizedItem.imageUrl,
+      weight: normalizedItem.weight,
+      length: normalizedItem.length,
+      width: normalizedItem.width,
+      height: normalizedItem.height,
     });
     storeGroup.subTotal = roundMoney(storeGroup.subTotal + normalizedItem.unitPrice * normalizedItem.quantity);
   }
@@ -416,8 +440,277 @@ const normalizeCartForCheckoutOrThrow = async (userId, session) => {
   return { cart, normalizedItems, groupedByStore };
 };
 
+const normalizeCarrierId = (carrierId) => String(carrierId ?? "").trim();
+
+const normalizeShippingSelectionsByStore = (shippingSelections = []) => {
+  if (!Array.isArray(shippingSelections) || shippingSelections.length === 0) {
+    throw createHttpError(
+      "Seleção de frete obrigatória para finalizar o checkout",
+      400,
+      undefined,
+      "CHECKOUT_SHIPPING_SELECTION_REQUIRED",
+    );
+  }
+
+  const byStore = new Map();
+  for (const selection of shippingSelections) {
+    const storeId = String(selection?.storeId ?? "").trim();
+    const carrierId = normalizeCarrierId(selection?.carrierId);
+
+    if (!storeId || !carrierId) {
+      throw createHttpError("Seleção de frete inválida", 400, { selection }, "CHECKOUT_SHIPPING_SELECTION_INVALID");
+    }
+
+    byStore.set(storeId, {
+      storeId,
+      carrierId,
+    });
+  }
+
+  return byStore;
+};
+
+const buildShippingProductsPayload = (items = []) => {
+  return items.map((item) => ({
+    id: item.productVariantId.toString(),
+    width: item.width || 10,
+    height: item.height || 10,
+    length: item.length || 10,
+    weight: item.weight || 0.5,
+    quantity: item.quantity,
+    insurance_value: Number(item.price ?? 0) * Number(item.quantity ?? 0),
+  }));
+};
+
+const resolveFreightPolicyByCoupon = (coupon) => {
+  return shippingService.resolveFreightPolicy({ coupon });
+};
+
+const calculateShippingByStoreForCheckoutOrThrow = async ({
+  groupedByStore,
+  shippingSelectionsByStore,
+  address,
+  coupon,
+}) => {
+  const storeIds = Array.from(groupedByStore.keys());
+
+  if (shippingSelectionsByStore.size !== storeIds.length) {
+    throw createHttpError(
+      "Selecione o frete de todas as lojas antes de finalizar",
+      400,
+      { expectedStores: storeIds.length, selectedStores: shippingSelectionsByStore.size },
+      "CHECKOUT_SHIPPING_SELECTION_INCOMPLETE",
+    );
+  }
+
+  const stores = await Store.find({ _id: { $in: storeIds }, status: "active" })
+    .select("_id address")
+    .populate("address", "zipCode street number complement neighborhood city state");
+
+  const storeById = new Map(stores.map((store) => [store._id.toString(), store]));
+  const shippingByStore = new Map();
+  let totalShippingPrice = 0;
+
+  const freightPolicy = resolveFreightPolicyByCoupon(coupon);
+
+  for (const storeId of storeIds) {
+    const store = storeById.get(storeId);
+    if (!store) {
+      throw createHttpError("Uma ou mais lojas do carrinho estão inválidas", 400, undefined, "CHECKOUT_STORE_INVALID");
+    }
+
+    if (!store.address) {
+      throw createHttpError(
+        "Uma ou mais lojas não possuem endereço para cálculo de frete",
+        400,
+        { storeId },
+        "CHECKOUT_STORE_ADDRESS_MISSING",
+      );
+    }
+
+    const selection = shippingSelectionsByStore.get(storeId);
+    if (!selection) {
+      throw createHttpError(
+        "Seleção de frete ausente para uma das lojas",
+        400,
+        { storeId },
+        "CHECKOUT_SHIPPING_SELECTION_MISSING_STORE",
+      );
+    }
+
+    const storeGroup = groupedByStore.get(storeId);
+
+    const shippingPayload = {
+      from: {
+        postal_code: String(store.address.zipCode ?? "").replace("-", ""),
+        address: store.address.street,
+        number: store.address.number,
+        complement: store.address.complement || "",
+        district: store.address.neighborhood,
+        city: store.address.city,
+        state: store.address.state,
+      },
+      to: {
+        postal_code: String(address.zipCode ?? "").replace("-", ""),
+        address: address.street,
+        number: address.number,
+        complement: address.complement || "",
+        district: address.neighborhood,
+        city: address.city,
+        state: address.state,
+      },
+      products: buildShippingProductsPayload(storeGroup.items),
+    };
+
+    const quoteResult = await melhorenvioService.calculateShipping(store._id, shippingPayload);
+    const carriers = Array.isArray(quoteResult?.carriers) ? quoteResult.carriers : [];
+
+    const selectedCarrier = carriers.find((carrier) => normalizeCarrierId(carrier?.id) === selection.carrierId);
+    if (!selectedCarrier) {
+      throw createHttpError(
+        "Transportadora selecionada é inválida ou expirou",
+        400,
+        { storeId, carrierId: selection.carrierId },
+        "CHECKOUT_SHIPPING_CARRIER_INVALID",
+      );
+    }
+
+    const selectedCarrierPrice = roundMoney(Number(selectedCarrier.custom_price ?? selectedCarrier.price ?? 0));
+    if (!Number.isFinite(selectedCarrierPrice) || selectedCarrierPrice < 0) {
+      throw createHttpError(
+        "Valor de frete inválido retornado pela transportadora",
+        502,
+        { storeId, carrierId: selection.carrierId },
+        "CHECKOUT_SHIPPING_PRICE_INVALID",
+      );
+    }
+
+    const shippingCost = freightPolicy.whoPays === "platform_paid" ? 0 : selectedCarrierPrice;
+    totalShippingPrice = roundMoney(totalShippingPrice + shippingCost);
+
+    shippingByStore.set(storeId, {
+      shippingCost,
+      whoPays: freightPolicy.whoPays,
+      freeShipping: freightPolicy.freeShipping,
+      selectedCarrier: {
+        id: selectedCarrier.id,
+        name: selectedCarrier.name,
+        price: selectedCarrierPrice,
+        deliveryTime: Number(selectedCarrier.delivery_time ?? 0),
+      },
+    });
+  }
+
+  return {
+    shippingByStore,
+    totalShippingPrice,
+  };
+};
+
+export const getCheckoutShippingOptionsForUser = async (userId, payload) => {
+  const { addressId, couponCode } = payload;
+
+  const [address, cartContext] = await Promise.all([
+    Address.findOne({ _id: addressId, user: userId }).lean(),
+    normalizeCartForCheckoutOrThrow(userId),
+  ]);
+
+  if (!address) {
+    throw createHttpError("Endereço não encontrado", 404, undefined, "CHECKOUT_ADDRESS_NOT_FOUND");
+  }
+
+  const subTotal = roundMoney(
+    cartContext.normalizedItems.reduce((sum, item) => sum + item.unitPrice * item.quantity, 0),
+  );
+  const couponContext = await validateCouponByContextOrThrow({
+    couponCode,
+    subTotal,
+    items: cartContext.normalizedItems,
+    userId,
+  });
+
+  const freightPolicy = resolveFreightPolicyByCoupon(couponContext.coupon);
+  const storeIds = Array.from(cartContext.groupedByStore.keys());
+
+  const stores = await Store.find({ _id: { $in: storeIds }, status: "active" })
+    .select("_id name address")
+    .populate("address", "zipCode street number complement neighborhood city state");
+
+  const storeById = new Map(stores.map((store) => [store._id.toString(), store]));
+  const options = [];
+
+  for (const storeId of storeIds) {
+    const store = storeById.get(storeId);
+    if (!store) {
+      throw createHttpError("Uma ou mais lojas do carrinho estão inválidas", 400, undefined, "CHECKOUT_STORE_INVALID");
+    }
+
+    if (!store.address) {
+      throw createHttpError(
+        "Uma ou mais lojas não possuem endereço para cálculo de frete",
+        400,
+        { storeId },
+        "CHECKOUT_STORE_ADDRESS_MISSING",
+      );
+    }
+
+    const storeGroup = cartContext.groupedByStore.get(storeId);
+    const shippingPayload = {
+      from: {
+        postal_code: String(store.address.zipCode ?? "").replace("-", ""),
+        address: store.address.street,
+        number: store.address.number,
+        complement: store.address.complement || "",
+        district: store.address.neighborhood,
+        city: store.address.city,
+        state: store.address.state,
+      },
+      to: {
+        postal_code: String(address.zipCode ?? "").replace("-", ""),
+        address: address.street,
+        number: address.number,
+        complement: address.complement || "",
+        district: address.neighborhood,
+        city: address.city,
+        state: address.state,
+      },
+      products: buildShippingProductsPayload(storeGroup.items),
+    };
+
+    const quoteResult = await melhorenvioService.calculateShipping(store._id, shippingPayload);
+    const carriers = (Array.isArray(quoteResult?.carriers) ? quoteResult.carriers : []).map((carrier) => {
+      const rawPrice = roundMoney(Number(carrier.custom_price ?? carrier.price ?? 0));
+      const shippingCost = freightPolicy.whoPays === "platform_paid" ? 0 : rawPrice;
+
+      return {
+        id: carrier.id,
+        name: carrier.name,
+        price: rawPrice,
+        shippingCost,
+        deliveryTime: Number(carrier.delivery_time ?? 0),
+      };
+    });
+
+    options.push({
+      storeId,
+      storeName: store.name,
+      whoPays: freightPolicy.whoPays,
+      freeShipping: freightPolicy.freeShipping,
+      recommendedCarrierId: carriers[0]?.id ?? null,
+      carriers,
+    });
+  }
+
+  return {
+    addressId,
+    couponCode: couponContext.coupon?.code ?? null,
+    recommendedCarrierId: options[0]?.recommendedCarrierId ?? null,
+    stores: options,
+  };
+};
+
 export const createCheckoutIntentForUser = async (userId, payload) => {
-  const { addressId, paymentMethodId, couponCode } = payload;
+  const { addressId, paymentMethodId, couponCode, shippingSelections } = payload;
 
   const session = await mongoose.startSession();
 
@@ -426,6 +719,7 @@ export const createCheckoutIntentForUser = async (userId, payload) => {
   let subOrders;
   let subTotal;
   let totalDiscount;
+  let totalShippingPrice;
   let totalPaidByCustomer;
   let connectContextByStore;
 
@@ -461,7 +755,16 @@ export const createCheckoutIntentForUser = async (userId, payload) => {
       });
 
       totalDiscount = couponContext.discountAmount;
-      const totalShippingPrice = 0;
+
+      const shippingSelectionsByStore = normalizeShippingSelectionsByStore(shippingSelections);
+      const shippingContext = await calculateShippingByStoreForCheckoutOrThrow({
+        groupedByStore: cartContext.groupedByStore,
+        shippingSelectionsByStore,
+        address,
+        coupon: couponContext.coupon,
+      });
+
+      totalShippingPrice = shippingContext.totalShippingPrice;
       totalPaidByCustomer = roundMoney(subTotal - totalDiscount + totalShippingPrice);
       connectContextByStore = await buildStoreConnectContext(cartContext.groupedByStore, session);
 
@@ -491,7 +794,7 @@ export const createCheckoutIntentForUser = async (userId, payload) => {
             user: userId,
             totalPriceProducts: subTotal,
             totalPaidByCustomer,
-            totalShippingPrice: 0,
+            totalShippingPrice,
             totalDiscount,
             status: "pending",
             shippingAddress: buildShippingSnapshot(address),
@@ -506,12 +809,45 @@ export const createCheckoutIntentForUser = async (userId, payload) => {
         totalDiscount,
         coupon: couponContext.coupon,
         eligibleItemKeys: couponContext.eligibleItemKeys,
+        shippingByStore: shippingContext.shippingByStore,
         commissionRateByStore: new Map(
           Array.from(connectContextByStore.entries()).map(([storeId, context]) => [storeId, context.commissionRate]),
         ),
       });
 
       subOrders = await SubOrder.insertMany(subOrderPayload, { session });
+
+      if (subOrders.length > 0) {
+        const shippingDocsPayload = subOrders.map((subOrder) => {
+          const shippingDetails = shippingContext.shippingByStore.get(subOrder.store.toString());
+
+          return {
+            store: subOrder.store,
+            subOrder: subOrder._id,
+            carrier: shippingService.mapCarrierName(shippingDetails.selectedCarrier.name),
+            whoPays: shippingDetails.whoPays,
+            shippingCost: subOrder.shippingCost,
+            estimatedDeliveryDate: shippingService.calculateDeliveryDate(shippingDetails.selectedCarrier.deliveryTime),
+            status: "pending",
+            shippingServiceInfo: {
+              selectedCarrier: shippingDetails.selectedCarrier,
+              freeShipping: shippingDetails.freeShipping,
+              quotedAt: new Date(),
+            },
+          };
+        });
+
+        const shippingDocs = await Shipping.insertMany(shippingDocsPayload, { session });
+        const shippingIdBySubOrder = new Map(
+          shippingDocs.map((shippingDoc) => [shippingDoc.subOrder.toString(), shippingDoc._id]),
+        );
+
+        for (const subOrder of subOrders) {
+          const shippingId = shippingIdBySubOrder.get(subOrder._id.toString()) ?? null;
+          subOrder.shipping = shippingId;
+          await subOrder.save({ session });
+        }
+      }
 
       const platformRevenue = roundMoney(
         subOrderPayload.reduce((sum, subOrder) => sum + Number(subOrder.platformFee ?? 0), 0),
@@ -646,7 +982,7 @@ export const createCheckoutIntentForUser = async (userId, payload) => {
       summary: {
         totalPriceProducts: subTotal,
         totalDiscount,
-        totalShippingPrice: 0,
+        totalShippingPrice,
         totalPaidByCustomer,
         subOrders: subOrders.map((subOrder) => ({
           id: subOrder._id,
@@ -664,13 +1000,251 @@ export const createCheckoutIntentForUser = async (userId, payload) => {
   }
 };
 
+export const resumeCheckoutIntentForUser = async (userId, orderId) => {
+  const order = await Order.findOne({ _id: orderId, user: userId })
+    .select("_id user status stripePaymentId totalPaidByCustomer")
+    .lean();
+
+  if (!order) {
+    throw createHttpError("Pedido não encontrado", 404, undefined, "CHECKOUT_ORDER_NOT_FOUND");
+  }
+
+  if (order.status === "paid") {
+    throw createHttpError("Este pedido já foi pago", 409, undefined, "CHECKOUT_ALREADY_PAID");
+  }
+
+  if (order.status === "cancelled") {
+    throw createHttpError("Pedido cancelado não pode ser retomado", 409, undefined, "CHECKOUT_ORDER_CANCELLED");
+  }
+
+  const payment = await Payment.findOne({ order: order._id, user: userId })
+    .sort({ createdAt: -1 })
+    .select("_id order user amount currency status stripePaymentIntentId events")
+    .lean();
+
+  if (!payment) {
+    throw createHttpError("Pagamento não encontrado para este pedido", 404, undefined, "CHECKOUT_PAYMENT_NOT_FOUND");
+  }
+
+  const stripe = getStripeClientOrThrow();
+  const storeCount = await SubOrder.countDocuments({ order: order._id });
+  const amountInCents = Math.round(Number(payment.amount ?? order.totalPaidByCustomer ?? 0) * 100);
+
+  if (!Number.isFinite(amountInCents) || amountInCents <= 0) {
+    throw createHttpError("Valor inválido para retomar pagamento", 400, undefined, "CHECKOUT_INVALID_PAYMENT_AMOUNT");
+  }
+
+  let paymentIntent = null;
+  let reused = false;
+
+  if (payment.stripePaymentIntentId) {
+    try {
+      paymentIntent = await stripe.paymentIntents.retrieve(payment.stripePaymentIntentId);
+    } catch {
+      paymentIntent = null;
+    }
+  }
+
+  if (paymentIntent?.status === "succeeded") {
+    await markPaymentAsSucceededByIntentId({
+      stripePaymentIntent: paymentIntent,
+      stripeEventId: `manual_resume_sync_${paymentIntent.id}`,
+    });
+
+    const [updatedOrder, updatedPayment] = await Promise.all([
+      Order.findById(order._id).select("_id status stripePaymentId").lean(),
+      Payment.findById(payment._id).select("_id status stripePaymentIntentId paidAt").lean(),
+    ]);
+
+    return {
+      orderId: order._id.toString(),
+      paymentId: payment._id.toString(),
+      resumed: false,
+      synchronized: true,
+      orderStatus: updatedOrder?.status ?? "paid",
+      paymentStatus: updatedPayment?.status ?? "succeeded",
+      paymentIntent: {
+        provider: "stripe",
+        status: paymentIntent.status,
+        clientSecret: paymentIntent.client_secret,
+        amountInCents: paymentIntent.amount,
+        currency: String(paymentIntent.currency ?? payment.currency ?? "brl").toUpperCase(),
+      },
+    };
+  }
+
+  if (paymentIntent && paymentIntent.status !== "canceled") {
+    reused = true;
+  } else {
+    paymentIntent = await stripe.paymentIntents.create({
+      amount: amountInCents,
+      currency: String(payment.currency ?? "BRL").toLowerCase(),
+      automatic_payment_methods: { enabled: true },
+      transfer_group: `order_${order._id.toString()}`,
+      metadata: {
+        orderId: order._id.toString(),
+        paymentId: payment._id.toString(),
+        userId: userId.toString(),
+        storeCount: String(storeCount),
+        resumed: "true",
+      },
+    });
+
+    await Payment.updateOne(
+      { _id: payment._id },
+      {
+        $set: {
+          stripePaymentIntentId: paymentIntent.id,
+          status: mapStripeIntentStatusToPaymentStatus(paymentIntent.status),
+        },
+        $push: {
+          events: {
+            type: "checkout_intent_resumed",
+            at: new Date(),
+            metadata: {
+              stripePaymentIntentId: paymentIntent.id,
+            },
+          },
+        },
+      },
+    );
+
+    await Order.updateOne(
+      { _id: order._id, status: { $in: ["pending", "failed"] } },
+      {
+        $set: {
+          status: "pending",
+          stripePaymentId: paymentIntent.id,
+        },
+      },
+    );
+
+    await SubOrder.updateMany(
+      { order: order._id, status: "failed" },
+      {
+        $set: { status: "pending" },
+      },
+    );
+  }
+
+  return {
+    orderId: order._id.toString(),
+    paymentId: payment._id.toString(),
+    resumed: !reused,
+    paymentIntent: {
+      provider: "stripe",
+      status: paymentIntent.status,
+      clientSecret: paymentIntent.client_secret,
+      amountInCents: paymentIntent.amount,
+      currency: String(paymentIntent.currency ?? payment.currency ?? "brl").toUpperCase(),
+    },
+  };
+};
+
+export const reconcileCheckoutOrderPaymentForUser = async (userId, orderId) => {
+  const order = await Order.findOne({ _id: orderId, user: userId })
+    .select("_id user status stripePaymentId")
+    .lean();
+
+  if (!order) {
+    throw createHttpError("Pedido não encontrado", 404, undefined, "CHECKOUT_ORDER_NOT_FOUND");
+  }
+
+  const payment = await Payment.findOne({ order: order._id, user: userId })
+    .sort({ createdAt: -1 })
+    .select("_id status stripePaymentIntentId")
+    .lean();
+
+  if (!payment) {
+    throw createHttpError("Pagamento não encontrado para este pedido", 404, undefined, "CHECKOUT_PAYMENT_NOT_FOUND");
+  }
+
+  if (order.status === "paid" && payment.status === "succeeded") {
+    return {
+      orderId: order._id.toString(),
+      paymentId: payment._id.toString(),
+      synchronized: false,
+      alreadyConsistent: true,
+      orderStatus: order.status,
+      paymentStatus: payment.status,
+    };
+  }
+
+  const stripePaymentIntentId = payment.stripePaymentIntentId ?? order.stripePaymentId;
+
+  if (!stripePaymentIntentId) {
+    throw createHttpError(
+      "Pagamento sem vínculo Stripe para reconciliação",
+      409,
+      { orderId: order._id, paymentId: payment._id },
+      "CHECKOUT_RECONCILE_STRIPE_INTENT_MISSING",
+    );
+  }
+
+  const stripePaymentIntent = await getStripeClientOrThrow().paymentIntents.retrieve(stripePaymentIntentId);
+
+  if (stripePaymentIntent.status === "succeeded") {
+    await markPaymentAsSucceededByIntentId({
+      stripePaymentIntent,
+      stripeEventId: `manual_reconcile_${stripePaymentIntent.id}_${Date.now()}`,
+      metadata: {
+        paymentId: payment._id.toString(),
+        orderId: order._id.toString(),
+        manualReconcile: true,
+      },
+    });
+
+    const [updatedOrder, updatedPayment] = await Promise.all([
+      Order.findById(order._id).select("_id status stripePaymentId").lean(),
+      Payment.findById(payment._id).select("_id status stripePaymentIntentId paidAt").lean(),
+    ]);
+
+    return {
+      orderId: order._id.toString(),
+      paymentId: payment._id.toString(),
+      synchronized: true,
+      orderStatus: updatedOrder?.status ?? "paid",
+      paymentStatus: updatedPayment?.status ?? "succeeded",
+      stripeStatus: stripePaymentIntent.status,
+    };
+  }
+
+  return {
+    orderId: order._id.toString(),
+    paymentId: payment._id.toString(),
+    synchronized: false,
+    orderStatus: order.status,
+    paymentStatus: payment.status,
+    stripeStatus: stripePaymentIntent.status,
+  };
+};
+
+const resolvePaymentFromStripeEvent = async ({ session, stripePaymentIntentId, paymentId }) => {
+  if (paymentId) {
+    const paymentById = await Payment.findById(paymentId).session(session);
+    if (paymentById) {
+      return paymentById;
+    }
+  }
+
+  if (stripePaymentIntentId) {
+    return Payment.findOne({ stripePaymentIntentId }).session(session);
+  }
+
+  return null;
+};
+
 const markPaymentAsFailedByIntentId = async ({ stripePaymentIntentId, stripeEventId, eventType, metadata = {} }) => {
   const session = await mongoose.startSession();
   let failedOrderId = null;
 
   try {
     await session.withTransaction(async () => {
-      const payment = await Payment.findOne({ stripePaymentIntentId }).session(session);
+      const payment = await resolvePaymentFromStripeEvent({
+        session,
+        stripePaymentIntentId,
+        paymentId: metadata.paymentId,
+      });
       if (!payment) {
         throw createHttpError(
           "Pagamento ainda não registrado para esse evento",
@@ -717,7 +1291,6 @@ const tryDispatchPayoutTransfer = async ({ payout, payment, stripe }) => {
   if (payout.stripePayoutId) {
     return;
   }
-
   const store = await Store.findById(payout.store).select("stripeConnectId status").lean();
 
   if (!store || store.status !== "active") {
@@ -816,7 +1389,7 @@ export const dispatchPendingPayoutTransfersForStore = async (storeId) => {
   }
 };
 
-const markPaymentAsSucceededByIntentId = async ({ stripePaymentIntent, stripeEventId }) => {
+const markPaymentAsSucceededByIntentId = async ({ stripePaymentIntent, stripeEventId, metadata = {} }) => {
   const stripePaymentIntentId = stripePaymentIntent.id;
   const session = await mongoose.startSession();
   let orderIdForPayout = null;
@@ -825,7 +1398,11 @@ const markPaymentAsSucceededByIntentId = async ({ stripePaymentIntent, stripeEve
 
   try {
     await session.withTransaction(async () => {
-      const payment = await Payment.findOne({ stripePaymentIntentId }).session(session);
+      const payment = await resolvePaymentFromStripeEvent({
+        session,
+        stripePaymentIntentId,
+        paymentId: metadata.paymentId,
+      });
       if (!payment) {
         throw createHttpError(
           "Pagamento ainda não registrado para esse evento",
@@ -837,7 +1414,23 @@ const markPaymentAsSucceededByIntentId = async ({ stripePaymentIntent, stripeEve
 
       if (isEventAlreadyProcessed(payment, stripeEventId)) return;
 
+      if (!payment.stripePaymentIntentId) {
+        payment.stripePaymentIntentId = stripePaymentIntentId;
+      }
+
       if (payment.status === "succeeded") {
+        const order = await Order.findById(payment.order).session(session);
+        if (order && order.status !== "paid") {
+          order.status = "paid";
+          await order.save({ session });
+
+          await SubOrder.updateMany({ order: order._id, status: { $ne: "paid" } }, { $set: { status: "paid" } }, {
+            session,
+          });
+
+          orderIdForNotification = order._id;
+        }
+
         appendPaymentEvent({
           payment,
           stripeEventId,
@@ -896,25 +1489,31 @@ const markPaymentAsSucceededByIntentId = async ({ stripePaymentIntent, stripeEve
         }
       }
 
+      const stockUpdates = [];
       for (const subOrder of subOrders) {
         for (const item of subOrder.items ?? []) {
-          const updated = await ProductVariant.updateOne(
-            { _id: item.productVariantId, stock: { $gte: Number(item.quantity) } },
-            { $inc: { stock: -Number(item.quantity) } },
-            { session },
-          );
+          stockUpdates.push({
+            updateOne: {
+              filter: { _id: item.productVariantId, stock: { $gte: Number(item.quantity) } },
+              update: { $inc: { stock: -Number(item.quantity) } },
+            },
+          });
+        }
+      }
 
-          if (!updated.modifiedCount) {
-            throw createHttpError(
-              "Estoque insuficiente ao confirmar pagamento",
-              409,
-              {
-                productVariantId: item.productVariantId,
-                quantity: item.quantity,
-              },
-              "CHECKOUT_WEBHOOK_STOCK_CONFLICT",
-            );
-          }
+      if (stockUpdates.length > 0) {
+        const stockUpdateResult = await ProductVariant.bulkWrite(stockUpdates, { session, ordered: true });
+
+        if (Number(stockUpdateResult.modifiedCount) !== stockUpdates.length) {
+          throw createHttpError(
+            "Estoque insuficiente ao confirmar pagamento",
+            409,
+            {
+              expectedUpdates: stockUpdates.length,
+              appliedUpdates: Number(stockUpdateResult.modifiedCount),
+            },
+            "CHECKOUT_WEBHOOK_STOCK_CONFLICT",
+          );
         }
       }
 
@@ -1116,6 +1715,7 @@ export const processStripeWebhookEvent = async ({ payloadBuffer, signature }) =>
       await markPaymentAsSucceededByIntentId({
         stripePaymentIntent: event.data.object,
         stripeEventId: event.id,
+        metadata: event.data.object.metadata ?? {},
       });
       break;
     }
@@ -1127,6 +1727,7 @@ export const processStripeWebhookEvent = async ({ payloadBuffer, signature }) =>
         stripeEventId: event.id,
         eventType: event.type,
         metadata: {
+          paymentId: event.data.object.metadata?.paymentId ?? null,
           lastPaymentErrorCode: event.data.object.last_payment_error?.code ?? null,
         },
       });

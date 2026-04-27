@@ -20,6 +20,7 @@ import checkoutRoutes from "./routes/checkout.route.js";
 import uploadRoutes from "./routes/upload.route.js";
 import orderRoutes from "./routes/order.route.js";
 import shippingRoutes from "./routes/shipping.route.js";
+import webhookRoutes from "./routes/webhook.route.js";
 import reviewRoutes from "./routes/review.route.js";
 import notificationRoutes from "./routes/notification.route.js";
 import messageRoutes from "./routes/message.route.js";
@@ -124,12 +125,11 @@ app.use("/api/checkout", checkoutRoutes);
 app.use("/api/uploads", uploadRoutes);
 app.use("/api/orders", orderRoutes);
 app.use("/api/shipping", shippingRoutes);
+app.use("/api/webhooks", webhookRoutes);
 app.use("/api/reviews", reviewRoutes);
 app.use("/api/notifications", notificationRoutes);
 app.use("/api/messages", messageRoutes);
 app.use("/api/support", supportRoutes);
-app.use("/api/stores/me", shippingRoutes);
-app.use("/api/webhooks", shippingRoutes);
 
 app.use((req, res, next) => {
   next(createHttpError("Rota não encontrada", 404, undefined, "ROUTE_NOT_FOUND"));
