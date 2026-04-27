@@ -75,24 +75,24 @@ const ensureValidSellerStatusTransitionOrThrow = async (currentStatus, nextStatu
   }
 };
 
-const deriveOrderStatusFromSubOrders = (subOrderStatuses = []) => {
-  if (subOrderStatuses.length === 0) {
+const deriveOrderStatusFromSubOrders = (subOrderList = []) => {
+  if (subOrderList.length === 0) {
     return null;
   }
 
-  if (subOrderStatuses.every((status) => status === subOrderStatuses.CANCELLED)) {
+  if (subOrderList.every((status) => status === subOrderStatuses.CANCELLED)) {
     return orderStatuses.CANCELLED;
   }
 
-  if (subOrderStatuses.every((status) => status === subOrderStatuses.FAILED)) {
+  if (subOrderList.every((status) => status === subOrderStatuses.FAILED)) {
     return orderStatuses.FAILED;
   }
 
-  if (subOrderStatuses.some((status) => ORDER_PAID_LIKE_STATUSES.has(status))) {
+  if (subOrderList.some((status) => ORDER_PAID_LIKE_STATUSES.has(status))) {
     return orderStatuses.PAID;
   }
 
-  if (subOrderStatuses.every((status) => status === subOrderStatuses.PENDING)) {
+  if (subOrderList.every((status) => status === subOrderStatuses.PENDING)) {
     return orderStatuses.PENDING;
   }
 
