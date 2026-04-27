@@ -442,6 +442,24 @@ const normalizeCartForCheckoutOrThrow = async (userId, session) => {
 
 const normalizeCarrierId = (carrierId) => String(carrierId ?? "").trim();
 
+const buildCheckoutCartFingerprint = (groupedByStore) => {
+  return JSON.stringify(
+    Array.from(groupedByStore.entries())
+      .map(([storeId, storeGroup]) => ({
+        storeId: storeId.toString(),
+        subTotal: roundMoney(storeGroup.subTotal),
+        items: (storeGroup.items ?? [])
+          .map((item) => ({
+            productVariantId: item.productVariantId.toString(),
+            quantity: Number(item.quantity ?? 0),
+            unitPrice: roundMoney(item.price),
+          }))
+          .sort((a, b) => a.productVariantId.localeCompare(b.productVariantId)),
+      }))
+      .sort((a, b) => a.storeId.localeCompare(b.storeId)),
+  );
+};
+
 const normalizeShippingSelectionsByStore = (shippingSelections = []) => {
   if (!Array.isArray(shippingSelections) || shippingSelections.length === 0) {
     throw createHttpError(
@@ -712,6 +730,37 @@ export const getCheckoutShippingOptionsForUser = async (userId, payload) => {
 export const createCheckoutIntentForUser = async (userId, payload) => {
   const { addressId, paymentMethodId, couponCode, shippingSelections } = payload;
 
+  const [shippingAddress, shippingCartContext] = await Promise.all([
+    Address.findOne({ _id: addressId, user: userId }).lean(),
+    normalizeCartForCheckoutOrThrow(userId),
+  ]);
+
+  if (!shippingAddress) {
+    throw createHttpError("Endereço não encontrado", 404, undefined, "CHECKOUT_ADDRESS_NOT_FOUND");
+  }
+
+  const shippingSubTotal = roundMoney(
+    shippingCartContext.normalizedItems.reduce((sum, item) => sum + item.unitPrice * item.quantity, 0),
+  );
+
+  const shippingCouponContext = await validateCouponByContextOrThrow({
+    couponCode,
+    subTotal: shippingSubTotal,
+    items: shippingCartContext.normalizedItems,
+    userId,
+  });
+
+  const shippingSelectionsByStore = normalizeShippingSelectionsByStore(shippingSelections);
+  const shippingContext = await calculateShippingByStoreForCheckoutOrThrow({
+    groupedByStore: shippingCartContext.groupedByStore,
+    shippingSelectionsByStore,
+    address: shippingAddress,
+    coupon: shippingCouponContext.coupon,
+  });
+
+  const shippingCartFingerprint = buildCheckoutCartFingerprint(shippingCartContext.groupedByStore);
+  const shippingPolicyFingerprint = JSON.stringify(resolveFreightPolicyByCoupon(shippingCouponContext.coupon));
+
   const session = await mongoose.startSession();
 
   let order;
@@ -754,15 +803,27 @@ export const createCheckoutIntentForUser = async (userId, payload) => {
         session,
       });
 
-      totalDiscount = couponContext.discountAmount;
+      const currentCartFingerprint = buildCheckoutCartFingerprint(cartContext.groupedByStore);
+      if (currentCartFingerprint !== shippingCartFingerprint) {
+        throw createHttpError(
+          "Carrinho alterado durante o checkout. Recalcule o frete e tente novamente.",
+          409,
+          undefined,
+          "CHECKOUT_CART_CHANGED_REQUIRES_RECALC",
+        );
+      }
 
-      const shippingSelectionsByStore = normalizeShippingSelectionsByStore(shippingSelections);
-      const shippingContext = await calculateShippingByStoreForCheckoutOrThrow({
-        groupedByStore: cartContext.groupedByStore,
-        shippingSelectionsByStore,
-        address,
-        coupon: couponContext.coupon,
-      });
+      const currentPolicyFingerprint = JSON.stringify(resolveFreightPolicyByCoupon(couponContext.coupon));
+      if (currentPolicyFingerprint !== shippingPolicyFingerprint) {
+        throw createHttpError(
+          "Condição de frete alterada. Recalcule o frete e tente novamente.",
+          409,
+          undefined,
+          "CHECKOUT_SHIPPING_POLICY_CHANGED",
+        );
+      }
+
+      totalDiscount = couponContext.discountAmount;
 
       totalShippingPrice = shippingContext.totalShippingPrice;
       totalPaidByCustomer = roundMoney(subTotal - totalDiscount + totalShippingPrice);
