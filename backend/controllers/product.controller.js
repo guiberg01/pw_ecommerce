@@ -15,29 +15,20 @@ const canManageProduct = (product, user) => {
 };
 
 export const allProducts = async (req, res, next) => {
-  try {
     const { categoryId, page, limit } = req.validatedQuery ?? {};
     const visibleProducts = await getVisibleProducts({ categoryId, page, limit });
 
     return sendSuccess(res, 200, "Produtos listados com sucesso", visibleProducts);
-  } catch (error) {
-    return next(error);
-  }
 };
 
 export const getProductById = async (req, res, next) => {
-  try {
     const { id } = req.params;
     const product = await getProduct(id);
 
     return sendSuccess(res, 200, "Produto encontrado com sucesso", product);
-  } catch (error) {
-    return next(error);
-  }
 };
 
 export const createProductForMyStore = async (req, res, next) => {
-  try {
     const { name, description, category, highlighted, maxPerPerson, mainVariant, variants } = req.body;
 
     const store = await findActiveStoreByOwnerOrThrow(req.user._id);
@@ -57,13 +48,9 @@ export const createProductForMyStore = async (req, res, next) => {
       ...productResponse,
       mainVariantId: productResponse.mainVariant?._id?.toString?.() ?? null,
     });
-  } catch (error) {
-    return next(error);
-  }
 };
 
 export const updateProduct = async (req, res, next) => {
-  try {
     const { id } = req.params;
     const product = await findActiveProductOrThrow(id, { populateStoreOwner: true });
 
@@ -74,13 +61,9 @@ export const updateProduct = async (req, res, next) => {
     const updatedProduct = await updateProductAndPopulate(product, req.body);
 
     return sendSuccess(res, 200, "Produto atualizado com sucesso", updatedProduct);
-  } catch (error) {
-    return next(error);
-  }
 };
 
 export const deleteProduct = async (req, res, next) => {
-  try {
     const { id } = req.params;
     const product = await findActiveProductOrThrow(id, { populateStoreOwner: true });
 
@@ -91,7 +74,4 @@ export const deleteProduct = async (req, res, next) => {
     await softDeleteProduct(id);
 
     return sendSuccess(res, 200, "Produto removido com sucesso");
-  } catch (error) {
-    return next(error);
-  }
 };

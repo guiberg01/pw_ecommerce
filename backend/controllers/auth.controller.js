@@ -5,7 +5,6 @@ import { sendSuccess } from "../helpers/successResponse.js";
 import { endUserSession, rotateAccessToken, startUserSession } from "../services/auth.service.js";
 
 export const signup = async (req, res, next) => {
-  try {
     const { name, email, password, role } = req.body;
     const userExists = await User.findOne({ email });
 
@@ -25,13 +24,9 @@ export const signup = async (req, res, next) => {
       accessToken,
       refreshToken,
     });
-  } catch (error) {
-    return next(error);
-  }
 };
 
 export const login = async (req, res, next) => {
-  try {
     const { email, password } = req.body;
     const user = await User.findOne({ email });
 
@@ -49,26 +44,15 @@ export const login = async (req, res, next) => {
       accessToken,
       refreshToken,
     });
-  } catch (error) {
-    return next(error);
-  }
 };
 
 export const logout = async (req, res, next) => {
-  try {
     await endUserSession(req, res);
     return sendSuccess(res, 200, "Logout realizado com sucesso");
-  } catch (error) {
-    return next(error);
-  }
 };
 
 export const refreshToken = async (req, res, next) => {
-  try {
     await rotateAccessToken(req, res);
 
     return sendSuccess(res, 200, "Token renovado com sucesso");
-  } catch (error) {
-    return next(error);
-  }
 };
