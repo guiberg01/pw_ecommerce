@@ -1,6 +1,7 @@
 import Order from "../models/order.model.js";
 import SubOrder from "../models/subOrder.model.js";
 import Payment from "../models/payment.model.js";
+import Shipping from "../models/shipping.model.js";
 import { createHttpError } from "../helpers/httpError.js";
 import { findActiveStoreByOwnerOrThrow } from "./catalog.service.js";
 import { buildPaginationResult, buildPaymentView, groupByOrderId } from "./orderView.helper.js";
@@ -249,6 +250,10 @@ export const findSellerOrderByIdOrThrow = async (ownerId, orderId) => {
 
   const paymentView = buildPaymentView(payments, { includeGatewayIds: false });
 
+  const shippingDoc = await Shipping.findOne({ subOrder: subOrder._id })
+    .select("_id labelUrl trackingCode melhorEnvioOrderId status updatedAt")
+    .lean();
+
   return {
     id: order._id,
     order: {
@@ -279,6 +284,14 @@ export const findSellerOrderByIdOrThrow = async (ownerId, orderId) => {
       createdAt: subOrder.createdAt,
       updatedAt: subOrder.updatedAt,
       store: subOrder.store,
+      shipping: {
+        id: shippingDoc?._id ?? null,
+        labelUrl: shippingDoc?.labelUrl ?? null,
+        trackingCode: shippingDoc?.trackingCode ?? null,
+        melhorEnvioOrderId: shippingDoc?.melhorEnvioOrderId ?? null,
+        status: shippingDoc?.status ?? null,
+        updatedAt: shippingDoc?.updatedAt ?? null,
+      },
     },
     ...paymentView,
   };
