@@ -39,8 +39,13 @@ const paymentSchema = new mongoose.Schema(
     },
     stripePaymentIntentId: {
       type: String,
-      default: null,
+      default: undefined,
       trim: true,
+      set: (value) => {
+        if (value == null) return undefined;
+        const normalized = String(value).trim();
+        return normalized.length > 0 ? normalized : undefined;
+      },
     },
     stripeChargeId: {
       type: String,
