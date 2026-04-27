@@ -21,8 +21,6 @@ export const signup = async (req, res, next) => {
       name: user.name,
       email: user.email,
       role: user.role,
-      accessToken,
-      refreshToken,
     });
 };
 
@@ -41,8 +39,6 @@ export const login = async (req, res, next) => {
       name: user.name,
       email: user.email,
       role: user.role,
-      accessToken,
-      refreshToken,
     });
 };
 

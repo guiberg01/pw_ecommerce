@@ -129,7 +129,12 @@ export const addProductToCartForRequest = async (req, res, productId, quantity =
   });
 
   if (isAuthenticated(req) && previousItemCount === 0 && result.itemCount > 0) {
-    await notifyCartReminderForUser(req.user._id, { itemCount: result.itemCount });
+    try{
+      await notifyCartReminderForUser(req.user._id, { itemCount: result.itemCount });
+    }
+    catch (error) {
+      console.warn("Falha não-crítica ao enviar notificação de carrinho:", error.message ?? error);
+    }
   }
 
   return result;
