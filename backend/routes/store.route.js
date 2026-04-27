@@ -4,6 +4,7 @@ import {
   createStore,
   createMyStoreStripeOnboardingLink,
   getMyStoreStripeConnectStatus,
+  postMyStoreStripePayoutDispatch,
   getMyStore,
   getStoreById,
   updateMyStore,
@@ -36,6 +37,7 @@ router.get("/", validateQuery(storeListQuerySchema), allStores);
 router.get("/me", isLoggedIn, isSeller, getMyStore);
 router.put("/me", isLoggedIn, isSeller, validateBody(updateMyStoreSchema), updateMyStore);
 router.get("/me/stripe/status", isLoggedIn, isSeller, getMyStoreStripeConnectStatus);
+router.post("/me/stripe/payouts/dispatch", isLoggedIn, isSeller, postMyStoreStripePayoutDispatch);
 router.get("/me/orders", isLoggedIn, isSeller, validateQuery(storeOrderListQuerySchema), getMyStoreOrders);
 router.get("/me/orders/:orderId", isLoggedIn, isSeller, validateParams(storeOrderIdParamSchema), getMyStoreOrderById);
 router.patch(

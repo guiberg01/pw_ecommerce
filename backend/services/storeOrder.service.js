@@ -39,6 +39,20 @@ const buildOrderFilters = ({ orderStatus, createdFrom, createdTo }) => {
   return filters;
 };
 
+const buildOrderLookupFilters = (orderFilters) => {
+  const lookupFilters = {};
+
+  if (orderFilters.status) {
+    lookupFilters["orderDoc.status"] = orderFilters.status;
+  }
+
+  if (orderFilters.createdAt) {
+    lookupFilters["orderDoc.createdAt"] = orderFilters.createdAt;
+  }
+
+  return lookupFilters;
+};
+
 const buildSellerOrderSummary = (orders = [], subOrders = []) => {
   const subOrdersByOrderId = groupByOrderId(subOrders);
 
@@ -117,42 +131,6 @@ const buildSellerOrderItem = ({ order, subOrder, paymentView }) => ({
   payment: paymentView.payment,
 });
 
-const resolveSellerOrdersOrThrow = async (storeId, sellerOrderIds) => {
-  if (sellerOrderIds.length === 0) {
-    return [];
-  }
-
-  const orderMap = new Map();
-
-  const orders = await Order.find({ _id: { $in: sellerOrderIds } })
-    .populate("user", "name")
-    .select(ORDER_SELECT_FIELDS)
-    .lean();
-
-  for (const order of orders) {
-    orderMap.set(order._id.toString(), order);
-  }
-
-  const subOrders = await SubOrder.find({ order: { $in: sellerOrderIds }, store: storeId })
-    .select(SUB_ORDER_SELECT_FIELDS)
-    .lean();
-
-  const subOrdersByOrderId = groupByOrderId(subOrders);
-
-  return sellerOrderIds
-    .map((orderId) => {
-      const order = orderMap.get(orderId.toString());
-      const sellerSubOrder = subOrdersByOrderId.get(orderId.toString())?.[0];
-
-      if (!order || !sellerSubOrder) {
-        return null;
-      }
-
-      return { order, sellerSubOrder };
-    })
-    .filter(Boolean);
-};
-
 export const listOrdersForSeller = async (
   ownerId,
   { page = 1, limit = 20, orderStatus, subOrderStatus, createdFrom, createdTo, sort = "newest" } = {},
@@ -162,76 +140,176 @@ export const listOrdersForSeller = async (
   const sortDirection = sortDirectionFromValue(sort);
   const skip = (page - 1) * limit;
 
-  const candidateOrderIds = await Order.distinct("_id", orderFilters);
-
-  if (candidateOrderIds.length === 0) {
-    return buildPaginationResult([], 0, page, limit, {
-      summary: buildSellerOrderSummary([], []),
-    });
-  }
-
   const subOrderFilters = {
     store: store._id,
-    order: { $in: candidateOrderIds },
   };
 
   if (subOrderStatus) {
     subOrderFilters.status = subOrderStatus;
   }
 
-  const sellerOrderIds = await SubOrder.distinct("order", subOrderFilters);
+  const orderLookupFilters = buildOrderLookupFilters(orderFilters);
+  const basePipeline = [
+    { $match: subOrderFilters },
+    {
+      $lookup: {
+        from: "orders",
+        localField: "order",
+        foreignField: "_id",
+        as: "orderDoc",
+      },
+    },
+    { $unwind: "$orderDoc" },
+  ];
 
-  if (sellerOrderIds.length === 0) {
+  if (Object.keys(orderLookupFilters).length > 0) {
+    basePipeline.push({ $match: orderLookupFilters });
+  }
+
+  const groupedOrdersPipeline = [
+    ...basePipeline,
+    {
+      $group: {
+        _id: "$orderDoc._id",
+        createdAt: { $first: "$orderDoc.createdAt" },
+      },
+    },
+  ];
+
+  const [totalRows, pagedOrderRows, summaryRows] = await Promise.all([
+    SubOrder.aggregate([...groupedOrdersPipeline, { $count: "total" }]),
+    SubOrder.aggregate([
+      ...groupedOrdersPipeline,
+      { $sort: { createdAt: sortDirection, _id: 1 } },
+      { $skip: skip },
+      { $limit: limit },
+      { $project: { _id: 1 } },
+    ]),
+    SubOrder.aggregate([
+      ...basePipeline,
+      {
+        $addFields: {
+          itemCount: {
+            $reduce: {
+              input: { $ifNull: ["$items", []] },
+              initialValue: 0,
+              in: { $add: ["$$value", { $toInt: { $ifNull: ["$$this.quantity", 0] } }] },
+            },
+          },
+        },
+      },
+      {
+        $group: {
+          _id: null,
+          orderCount: { $sum: 1 },
+          grossRevenue: { $sum: { $ifNull: ["$subTotal", 0] } },
+          netRevenue: { $sum: { $ifNull: ["$vendorNetAmount", 0] } },
+          discountTotal: { $sum: { $ifNull: ["$discountAmount", 0] } },
+          shippingTotal: { $sum: { $ifNull: ["$shippingCost", 0] } },
+          itemsCount: { $sum: "$itemCount" },
+          pending: { $sum: { $cond: [{ $eq: ["$status", "pending"] }, 1, 0] } },
+          paid: { $sum: { $cond: [{ $eq: ["$status", "paid"] }, 1, 0] } },
+          processing: { $sum: { $cond: [{ $eq: ["$status", "processing"] }, 1, 0] } },
+          shipping: { $sum: { $cond: [{ $eq: ["$status", "shipping"] }, 1, 0] } },
+          delivered: { $sum: { $cond: [{ $eq: ["$status", "delivered"] }, 1, 0] } },
+          cancelled: { $sum: { $cond: [{ $eq: ["$status", "cancelled"] }, 1, 0] } },
+          failed: { $sum: { $cond: [{ $eq: ["$status", "failed"] }, 1, 0] } },
+        },
+      },
+    ]),
+  ]);
+
+  const total = Number(totalRows[0]?.total ?? 0);
+  if (total === 0) {
     return buildPaginationResult([], 0, page, limit, {
       summary: buildSellerOrderSummary([], []),
     });
   }
 
-  const [pagedOrders, summaryRows, payments] = await Promise.all([
-    Order.find({ _id: { $in: sellerOrderIds } })
+  const pagedOrderIds = pagedOrderRows.map((row) => row._id);
+  if (pagedOrderIds.length === 0) {
+    const aggregateSummary = summaryRows[0];
+    return buildPaginationResult([], total, page, limit, {
+      summary: {
+        orderCount: Number(aggregateSummary?.orderCount ?? 0),
+        grossRevenue: Number(aggregateSummary?.grossRevenue ?? 0),
+        netRevenue: Number(aggregateSummary?.netRevenue ?? 0),
+        discountTotal: Number(aggregateSummary?.discountTotal ?? 0),
+        shippingTotal: Number(aggregateSummary?.shippingTotal ?? 0),
+        itemsCount: Number(aggregateSummary?.itemsCount ?? 0),
+        statusBreakdown: {
+          pending: Number(aggregateSummary?.pending ?? 0),
+          paid: Number(aggregateSummary?.paid ?? 0),
+          processing: Number(aggregateSummary?.processing ?? 0),
+          shipping: Number(aggregateSummary?.shipping ?? 0),
+          delivered: Number(aggregateSummary?.delivered ?? 0),
+          cancelled: Number(aggregateSummary?.cancelled ?? 0),
+          failed: Number(aggregateSummary?.failed ?? 0),
+        },
+      },
+    });
+  }
+
+  const [pagedOrders, pagedSubOrders, payments] = await Promise.all([
+    Order.find({ _id: { $in: pagedOrderIds } })
       .populate("user", "name")
       .select(ORDER_SELECT_FIELDS)
-      .sort({ createdAt: sortDirection })
-      .skip(skip)
-      .limit(limit)
       .lean(),
-    resolveSellerOrdersOrThrow(store._id, sellerOrderIds),
-    Payment.find({ order: { $in: sellerOrderIds } })
+    SubOrder.find({ order: { $in: pagedOrderIds }, store: store._id }).select(SUB_ORDER_SELECT_FIELDS).lean(),
+    Payment.find({ order: { $in: pagedOrderIds } })
       .select(PAYMENT_SELECT_FIELDS)
       .lean(),
   ]);
 
-  const total = sellerOrderIds.length;
-
-  if (pagedOrders.length === 0) {
-    return buildPaginationResult([], total, page, limit, {
-      summary: buildSellerOrderSummary(summaryRows.map((row) => row.order), summaryRows.map((row) => row.sellerSubOrder)),
-    });
-  }
-
-  const summaryMap = new Map(summaryRows.map((row) => [row.order._id.toString(), row]));
+  const orderById = new Map(pagedOrders.map((order) => [order._id.toString(), order]));
+  const subOrderByOrderId = new Map(pagedSubOrders.map((subOrder) => [subOrder.order.toString(), subOrder]));
   const paymentsByOrderId = groupByOrderId(payments);
 
-  const items = pagedOrders.map((order) => {
-    const record = summaryMap.get(order._id.toString());
+  const items = pagedOrderIds
+    .map((orderId) => {
+      const order = orderById.get(orderId.toString());
+      const subOrder = subOrderByOrderId.get(orderId.toString());
 
-    if (!record) {
-      throw createHttpError("Pedido do seller não encontrado", 404, undefined, "SELLER_ORDER_NOT_FOUND");
-    }
+      if (!order || !subOrder) {
+        return null;
+      }
 
-    const paymentView = buildPaymentView(paymentsByOrderId.get(order._id.toString()) ?? [], {
-      includeGatewayIds: false,
-    });
+      const paymentView = buildPaymentView(paymentsByOrderId.get(order._id.toString()) ?? [], {
+        includeGatewayIds: false,
+      });
 
-    return buildSellerOrderItem({
-      order,
-      subOrder: record.sellerSubOrder,
-      paymentView,
-    });
-  });
+      return buildSellerOrderItem({
+        order,
+        subOrder,
+        paymentView,
+      });
+    })
+    .filter(Boolean);
+
+  if (items.length !== pagedOrderIds.length) {
+    throw createHttpError("Pedido do seller não encontrado", 404, undefined, "SELLER_ORDER_NOT_FOUND");
+  }
+
+  const aggregateSummary = summaryRows[0];
 
   return buildPaginationResult(items, total, page, limit, {
-    summary: buildSellerOrderSummary(summaryRows.map((row) => row.order), summaryRows.map((row) => row.sellerSubOrder)),
+    summary: {
+      orderCount: Number(aggregateSummary?.orderCount ?? 0),
+      grossRevenue: Number(aggregateSummary?.grossRevenue ?? 0),
+      netRevenue: Number(aggregateSummary?.netRevenue ?? 0),
+      discountTotal: Number(aggregateSummary?.discountTotal ?? 0),
+      shippingTotal: Number(aggregateSummary?.shippingTotal ?? 0),
+      itemsCount: Number(aggregateSummary?.itemsCount ?? 0),
+      statusBreakdown: {
+        pending: Number(aggregateSummary?.pending ?? 0),
+        paid: Number(aggregateSummary?.paid ?? 0),
+        processing: Number(aggregateSummary?.processing ?? 0),
+        shipping: Number(aggregateSummary?.shipping ?? 0),
+        delivered: Number(aggregateSummary?.delivered ?? 0),
+        cancelled: Number(aggregateSummary?.cancelled ?? 0),
+        failed: Number(aggregateSummary?.failed ?? 0),
+      },
+    },
   });
 };
 
