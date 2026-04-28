@@ -7,20 +7,18 @@ export const useSoftDelete = (schema) => {
     },
   });
 
-  const applySoftDeleteFilter = function (next) {
+  const applySoftDeleteFilter = function () {
     const filter = typeof this.getFilter === "function" ? this.getFilter() : this.getQuery();
 
     if (filter?.includeDeleted) {
       delete filter.includeDeleted;
       this.setQuery(filter);
-      return next();
+      return;
     }
 
     if (!Object.prototype.hasOwnProperty.call(filter, "deletedAt")) {
       this.where({ deletedAt: null });
     }
-
-    next();
   };
 
   schema.pre("find", applySoftDeleteFilter);
@@ -29,15 +27,14 @@ export const useSoftDelete = (schema) => {
   schema.pre("count", applySoftDeleteFilter);
   schema.pre("countDocuments", applySoftDeleteFilter);
 
-  schema.pre("aggregate", function (next) {
+  schema.pre("aggregate", function () {
     const pipeline = this.pipeline();
 
     if (pipeline[0]?.$match?.includeDeleted) {
       delete pipeline[0].$match.includeDeleted;
-      return next();
+      return;
     }
 
     pipeline.unshift({ $match: { deletedAt: null } });
-    next();
   });
 };
